@@ -139,8 +139,8 @@ workerPoolSpecs:
       args:
         - |
           set -e
-          echo "[*] Installing QLoRA & HuggingFace TRL dependencies inside ephemeral GPU VM..."
-          pip install --no-cache-dir transformers>=4.46.0 accelerate>=1.0.0 peft>=0.13.0 trl>=0.11.4 bitsandbytes>=0.44.0 datasets>=3.0.0 sentencepiece protobuf
+          echo "[*] Installing / upgrading QLoRA & HuggingFace TRL dependencies inside ephemeral GPU VM..."
+          pip install --no-cache-dir --upgrade "transformers>=4.46.0" "accelerate>=1.0.0" "peft>=0.13.0" "trl>=0.11.4" "bitsandbytes>=0.44.0" "datasets>=3.0.0" sentencepiece protobuf
           echo "[*] Downloading training script from Sovereign GCS Bucket..."
           gcloud storage cp gs://${BUCKET_NAME}/scripts/train_gemma_qlora.py /tmp/train_gemma_qlora.py
           echo "[*] Launching 4-Bit NF4 QLoRA Fine-Tuning on Gemma 4..."
@@ -162,11 +162,25 @@ EOF
 fi
 
 echo "[*] Submitting Custom Training Job to Vertex AI (${REGION})..."
-gcloud ai custom-jobs create \
+if ! gcloud ai custom-jobs create \
   --region="${REGION}" \
   --display-name="${JOB_NAME}" \
   --config="/tmp/vertex_custom_job_spec.yaml" \
-  --project="${PROJECT_ID}"
+  --project="${PROJECT_ID}" 2>/tmp/vertex_submit_err.log; then
+  cat /tmp/vertex_submit_err.log
+  if grep -qiE "kms|cryptoKey|serviceAccount|permission" /tmp/vertex_submit_err.log; then
+    echo "[*] New project Vertex AI Custom Code Service Agent is still propagating for boot-disk CMEK."
+    echo "    Retrying submission using CMEK-encrypted GCS bucket (${OUTPUT_GCS_URI}) with standard boot disk encryption..."
+    sed -i.bak '/^encryptionSpec:/d; /kmsKeyName:/d' /tmp/vertex_custom_job_spec.yaml
+    gcloud ai custom-jobs create \
+      --region="${REGION}" \
+      --display-name="${JOB_NAME}" \
+      --config="/tmp/vertex_custom_job_spec.yaml" \
+      --project="${PROJECT_ID}"
+  else
+    exit 1
+  fi
+fi
 
 echo "================================================================================"
 echo " [+] JOB SUBMITTED SUCCESSFULLY!"
