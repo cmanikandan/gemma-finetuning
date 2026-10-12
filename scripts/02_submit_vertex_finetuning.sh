@@ -33,14 +33,15 @@ export MACHINE_TYPE="${MACHINE_TYPE:-g2-standard-12}"
 export ACCELERATOR_TYPE="${ACCELERATOR_TYPE:-NVIDIA_L4}"
 export ACCELERATOR_COUNT="${ACCELERATOR_COUNT:-1}"
 
-# Supported Model Generations:
-# - Gemma 4 MoE (26B Total / 4B Active): google/gemma-4-26b-a4b-it (Fits on 1x L4 24GB or 2x L4 with ultra-fast 4B active inference!)
-# - Gemma 4 Dense Flagship (31B):        google/gemma-4-31b-it     (Use g2-standard-24 [2x L4] or a2-highgpu-1g [1x A100])
-# - Gemma 3 Multimodal/128K (12B):       google/gemma-3-12b-it     (Default single-L4 24GB sweet spot)
-# - Gemma 2 Dense (9B):                  google/gemma-2-9b-it
-export BASE_MODEL_ID="${BASE_MODEL_ID:-google/gemma-3-12b-it}"
+# Supported Model Generations (Gemma 4 is the default):
+# - Gemma 4 12B Unified (Default):       google/gemma-4-12B-it     (Single L4 24GB sweet spot; encoder-free unified model)
+# - Gemma 4 E4B (Fast/Lower-Resource):   google/gemma-4-E4B-it     (Single L4 24GB; fastest training & lowest VRAM)
+# - Gemma 4 MoE (26B Total / 4B Active): google/gemma-4-26B-A4B-it (Fits on 1x L4 24GB or 2x L4 with ultra-fast 4B active inference!)
+# - Gemma 4 Dense Flagship (31B):        google/gemma-4-31B-it     (Use g2-standard-24 [2x L4] or a2-highgpu-1g [1x A100])
+# - Legacy Gemma 3 / 2 (Supported):      google/gemma-3-12b-it, google/gemma-2-9b-it
+export BASE_MODEL_ID="${BASE_MODEL_ID:-google/gemma-4-12B-it}"
 export BASE_MIRROR="gs://${BUCKET_NAME}/models/base-mirror/${BASE_MODEL_ID//\//_}"
-export JOB_NAME="gemma-fsi-qlora-sft-$(date +%Y%m%d-%H%M%S)"
+export JOB_NAME="gemma4-fsi-qlora-sft-$(date +%Y%m%d-%H%M%S)"
 export OUTPUT_GCS_URI="gs://${BUCKET_NAME}/models/${JOB_NAME}"
 
 # First run pulls from Hugging Face Hub and mirrors to Mumbai GCS; subsequent runs load directly from the Mumbai mirror!
@@ -55,9 +56,9 @@ fi
 
 if [[ -z "${HF_TOKEN:-}" ]]; then
   echo "[!] WARNING: HF_TOKEN environment variable is not set."
-  echo "    If pulling gated Gemma weights from HuggingFace Hub, export your token first:"
+  echo "    If pulling Gemma weights from HuggingFace Hub on the first run, export your token:"
   echo "    export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxx"
-  echo "    (Or pass a gs:// URI to BASE_MODEL_ID if weights are already mirrored in GCS Model Garden)"
+  echo "    (Subsequent runs load automatically from your Mumbai GCS mirror: ${BASE_MIRROR})"
 fi
 
 echo "================================================================================"
@@ -142,9 +143,10 @@ workerPoolSpecs:
           pip install --no-cache-dir transformers>=4.46.0 accelerate>=1.0.0 peft>=0.13.0 trl>=0.11.4 bitsandbytes>=0.44.0 datasets>=3.0.0 sentencepiece protobuf
           echo "[*] Downloading training script from Sovereign GCS Bucket..."
           gcloud storage cp gs://${BUCKET_NAME}/scripts/train_gemma_qlora.py /tmp/train_gemma_qlora.py
-          echo "[*] Launching 4-Bit NF4 QLoRA Fine-Tuning..."
+          echo "[*] Launching 4-Bit NF4 QLoRA Fine-Tuning on Gemma 4..."
           python3 /tmp/train_gemma_qlora.py \
-            --model-id="${BASE_MODEL_ID}" \
+            --model-id="${EFFECTIVE_MODEL_ARG}" \
+            --mirror-to="${MIRROR_TO_ARG}" \
             --train-dataset="gs://${BUCKET_NAME}/dataset/indian_fsi_sft_train.jsonl" \
             --val-dataset="gs://${BUCKET_NAME}/dataset/indian_fsi_sft_val.jsonl" \
             --output-dir="${OUTPUT_GCS_URI}" \

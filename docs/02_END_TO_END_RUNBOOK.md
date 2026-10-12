@@ -71,9 +71,9 @@ gcloud config set project "${PROJECT_ID}"
 
 ### 0d. Provide Your Hugging Face Token
 
-Gemma weights are **gated** — you must accept Google's license on Hugging Face before you can download them.
+Gemma weights are hosted on Hugging Face. Setting a token avoids rate limits and ensures access to gated checkpoints:
 
-1. Go to <https://huggingface.co/google/gemma-3-12b-it> and click **"Acknowledge license"** (instant, free).
+1. Go to <https://huggingface.co/google/gemma-4-12B-it> (or <https://huggingface.co/google/gemma-4-E4B-it>) and verify access (Gemma 4 checkpoints are Apache 2.0 licensed).
 2. Create a **read** token at <https://huggingface.co/settings/tokens>.
 3. Export it:
 
@@ -82,7 +82,7 @@ export HF_TOKEN="hf_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"
 ```
 
 > [!WARNING]
-> If you skip the license acknowledgement, Step 4 will fail **~4 minutes in** (after the GPU has already spun up) with `401 Client Error: Unauthorized` or `GatedRepoError`. This is the single most common bootcamp failure. Accept the license **now**.
+> If you do not export `HF_TOKEN`, Step 4 may hit anonymous Hugging Face download rate limits after the GPU has already spun up. Export the token **now** (note: after the first run, the base model is automatically mirrored to your Mumbai GCS bucket!).
 
 ### 0e. Run the Pre-Flight Check
 
@@ -268,20 +268,21 @@ SOVEREIGN INFRASTRUCTURE READY.
 This is the actual training step. **No Docker runs on your machine.**
 
 ```bash
-export BASE_MODEL_ID="google/gemma-3-12b-it"   # default; see alternatives below
+export BASE_MODEL_ID="google/gemma-4-12B-it"   # default; see alternatives below
 export BUILD_MODE="prebuilt"                   # default; zero container build
 
 ./scripts/02_submit_vertex_finetuning.sh
 ```
 
-### Choosing Your Base Model
+### Choosing Your Base Model (Gemma 4 Default)
 
 | `BASE_MODEL_ID` | VRAM (QLoRA) | Machine | When to Choose It |
 | :--- | :--- | :--- | :--- |
-| `google/gemma-3-12b-it` | ~13.4 GB | `g2-standard-12` (1x L4) | **Default.** Best accuracy/cost balance; 128K context. |
-| `google/gemma-4-26b-a4b-it` | ~18.2 GB | `g2-standard-12` (1x L4) | Fastest inference (MoE: 26B knowledge, 4B active compute). |
-| `google/gemma-3-4b-it` | ~5.4 GB | `n1-standard-8` (1x T4) | **T4 fallback** when no L4 is available in India. |
-| `google/gemma-2-9b-it` | ~11.8 GB | `g2-standard-12` (1x L4) | Foundational/most-documented option. |
+| `google/gemma-4-12B-it` | ~13.8 GB | `g2-standard-12` (1x L4) | **Default.** Gemma 4 12B Unified — best accuracy/cost balance. |
+| `google/gemma-4-E4B-it` | ~9.5 GB | `g2-standard-12` (1x L4) | **Fastest & Lightest Gemma 4.** Ideal for JSON/passbook parsing or T4 fallback. |
+| `google/gemma-4-26B-A4B-it` | ~18.2 GB | `g2-standard-12` (1x L4) | **Gemma 4 MoE** (26B knowledge, 4B active compute speed). |
+| `google/gemma-4-31B-it` | ~24.8 GB | `g2-standard-24` (2x L4) | **Gemma 4 31B Dense Flagship** for complex multi-doc credit memos. |
+| `google/gemma-3-12b-it` | ~13.4 GB | `g2-standard-12` (1x L4) | Legacy Gemma 3 12B option. |
 
 ### The Two Build Modes
 
@@ -292,10 +293,10 @@ export BUILD_MODE="prebuilt"                   # default; zero container build
 
 ```text
 Submitting Vertex AI Custom Job in asia-south1...
-  Job Name:     gemma-fsi-qlora-sft-20260916-204512
-  Base Model:   google/gemma-3-12b-it
+  Job Name:     gemma4-fsi-qlora-sft-20261012-123000
+  Base Model:   google/gemma-4-12B-it
   Machine:      g2-standard-12 + 1x NVIDIA_L4
-  Output:       gs://my-project-fsi-gemma-sovereign-asia-south1/models/gemma-fsi-qlora-sft-20260916-204512
+  Output:       gs://my-project-fsi-gemma-sovereign-asia-south1/models/gemma4-fsi-qlora-sft-20261012-123000
   CMEK:         projects/my-project/locations/asia-south1/keyRings/fsi-sovereign-kr/cryptoKeys/gemma-cmek-key
 
 CustomJob [projects/123456789/locations/asia-south1/customJobs/8812...] submitted successfully.
@@ -317,7 +318,7 @@ gcloud ai custom-jobs describe <JOB_ID> --region="${REGION}" --format="value(sta
 **What healthy training logs look like:**
 
 ```text
-Loading base model google/gemma-3-12b-it in 4-bit NF4...
+Loading base model google/gemma-4-12B-it in 4-bit NF4...
 trainable params: 65,011,712 || all params: 12,187,325,440 || trainable%: 0.5334
 {'loss': 2.1043, 'grad_norm': 0.842, 'learning_rate': 0.000196, 'epoch': 0.13}
 {'loss': 0.8817, 'grad_norm': 0.511, 'learning_rate': 0.000171, 'epoch': 0.67}
@@ -330,15 +331,15 @@ Saving merged model to gs://.../merged_model_bf16
 
 **How to read it**: `loss` should fall steadily from ~2.1 toward ~0.3 over 225 steps. If loss goes **up**, or prints `nan`, stop — see the table below. `trainable%` around **0.5%** confirms LoRA is active; if it says `100%` you are accidentally doing full fine-tuning and will OOM.
 
-**Runtime**: ~32 minutes for Gemma-3-12B (≈4 min container startup + ≈28 min training). **Cost**: ~$0.62.
+**Runtime**: ~30 minutes for Gemma 4 12B (~18 minutes for Gemma 4 E4B). **Cost**: ~$0.38–$0.62.
 
 **Troubleshooting:**
 
 | Error | Cause & Fix |
 | :--- | :--- |
 | `ZONE_RESOURCE_POOL_EXHAUSTED` / `RESOURCE_EXHAUSTED` | No L4 capacity in that zone right now. See [Appendix A](#appendix-a--what-if-i-cant-get-a-gpu-in-india). |
-| `401 Unauthorized` / `GatedRepoError` on model download | You didn't accept the Gemma license on Hugging Face, or `HF_TOKEN` wasn't passed. Accept the license, re-export `HF_TOKEN`, resubmit. |
-| `CUDA out of memory` | Your model is too big for the GPU. Drop to `google/gemma-3-4b-it`, or reduce `per_device_train_batch_size` to 1 and raise `gradient_accumulation_steps` to 16 (keeps effective batch size at 16). |
+| `401 Unauthorized` / `GatedRepoError` on model download | Set `HF_TOKEN` and re-run. |
+| `CUDA out of memory` | Your model is too big for the GPU. Drop to `google/gemma-4-E4B-it`, or reduce `--batch-size` to 1 and raise `--grad-accum` to 16 (keeps effective batch size at 16). |
 | Loss becomes `nan` after a few steps | Almost always `float16` instead of `bfloat16`. Gemma's attention soft-capping overflows fp16. Confirm the job is on an L4/A100 (native bf16) — **T4 GPUs cannot do bf16**, which is why the T4 path uses a smaller model with explicit settings. |
 | Job stuck in `JOB_STATE_PENDING` > 15 min | Capacity queueing. Either wait, or cancel and switch region. |
 | `Permission denied` writing to `gs://...` | The Vertex AI service agent lacks CMEK decrypt rights. Re-run Step 3 — it grants exactly this. |
@@ -582,12 +583,12 @@ gcloud storage cp -r \
 ```bash
 export MACHINE_TYPE="n1-standard-8"
 export ACCELERATOR_TYPE="NVIDIA_TESLA_T4"
-export BASE_MODEL_ID="google/gemma-3-4b-it"   # REQUIRED: T4 has no native bf16
+export BASE_MODEL_ID="google/gemma-4-E4B-it"   # Compact Gemma 4 E4B model for T4/L4
 ./scripts/02_submit_vertex_finetuning.sh
 ```
 
 > [!WARNING]
-> **You must use a smaller model on T4.** T4 (Turing architecture) has **no native `bfloat16` support**, and Gemma's attention logit soft-capping overflows `float16`, producing `NaN` loss. The notebook handles this automatically by detecting VRAM and selecting `gemma-3-4b-it`.
+> **Prefer L4 over T4 whenever possible.** NVIDIA L4 (Ada Lovelace) has native `bfloat16` support, whereas T4 (Turing) does not. If using T4, always use a compact checkpoint (`google/gemma-4-E4B-it` or `google/gemma-3-4b-it`).
 
 ### Option 3: Dynamic Workload Scheduler (production pattern)
 
@@ -606,7 +607,7 @@ For a bank that *must* train on L4/A100 inside `asia-south1`, submit with **DWS 
 | `KEYRING_NAME` | `fsi-sovereign-kr` | Steps 3, 4, 8 |
 | `KEY_NAME` | `gemma-cmek-key` | Steps 3, 4, 8 |
 | `AR_REPO_NAME` | `fsi-gemma-repo` | Steps 3, 8 |
-| `BASE_MODEL_ID` | `google/gemma-3-12b-it` | Step 4 |
+| `BASE_MODEL_ID` | `google/gemma-4-12B-it` | Step 4 |
 | `BUILD_MODE` | `prebuilt` | Step 4 |
 | `MACHINE_TYPE` | `g2-standard-12` | Step 4 |
 | `ACCELERATOR_TYPE` | `NVIDIA_L4` | Step 4 |

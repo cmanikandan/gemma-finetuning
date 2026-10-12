@@ -28,6 +28,44 @@ Fine-tuning is **not** always the right answer. Before spending a rupee of GPU b
 
 ---
 
+## 📋 Prerequisites Before Running This Lab (5-Minute Checklist)
+
+You do **not** need a local GPU, Docker Desktop, or an ML PhD to run this lab. Before starting, verify these 4 items:
+
+| Prerequisite | What You Need | How to Check / Fix |
+| :--- | :--- | :--- |
+| **1. Terminal Environment** | **Google Cloud Shell** *(recommended — free, runs in your browser with everything pre-installed)* **OR** a Mac/Linux terminal with `gcloud` and `python3` (3.9+). **Zero local Docker, zero `uv`, zero local GPU needed.** | Run `./scripts/00_preflight_check.sh` |
+| **2. Google Cloud Project & IAM** | A GCP project with **Billing Enabled** where your account has `Owner` or (`Editor` + `Cloud KMS Admin` + `Storage Admin` + `Vertex AI Administrator`). | `gcloud config set project YOUR_PROJECT_ID` |
+| **3. GPU Quota in `asia-south1` (Mumbai)** | At least **1x NVIDIA L4 GPU** quota in `asia-south1` (or fallback region `asia-southeast1` / `us-central1`):<br/>• **Training quota**: `Custom model training Nvidia L4 GPUs per region` $\ge 1$<br/>• **Serving quota**: `Nvidia L4 GPUs` (Compute Engine / Cloud Run) $\ge 1$ | Go to **IAM & Admin → Quotas**, filter by `NVIDIA_L4_GPUS` and `asia-south1`, and request `1` (usually auto-approved in minutes). If you only have `T4` quota, set `BASE_MODEL_ID=google/gemma-4-E4B-it`. |
+| **4. Hugging Face Read Token (`HF_TOKEN`)** | A free Hugging Face token (`hf_...`) for the initial pull of `google/gemma-4-12B-it` or `google/gemma-4-E4B-it` (subsequent runs load from your Mumbai GCS mirror). | Create a Read token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens) and run `export HF_TOKEN=hf_...` |
+
+> [!TIP]
+> **One-Command Pre-Flight Check**: Run `./scripts/00_preflight_check.sh` before spending a single rupee. It is 100% read-only and verifies all 7 environment requirements automatically.
+
+---
+
+## 💰 What Will This Lab Cost Me? (Exact USD & INR Billing Breakdown)
+
+Running the **entire end-to-end lab costs roughly `$0.80 – $1.50 USD` (`~₹70 – ₹130 INR`)**, **provided you run the cleanup script (`./scripts/99_cleanup_resources.sh --confirm`) when you finish**.
+
+Here is the exact step-by-step billing breakdown in `asia-south1` (Mumbai):
+
+| Lab Step & Script | GCP Resources Used | Typical Duration | Estimated Cost (USD / INR) | Billing Behavior |
+| :--- | :--- | :--- | :--- | :--- |
+| **Step 0: Pre-Flight Check** (`00_preflight_check.sh`) | Read-only `gcloud` API calls | 10 seconds | **$0.00 (`₹0`)** | Free |
+| **Lab 1: Dataset Gen, Audit & Offline Evals** (`generate_fsi_dataset.py`, `inspect_dataset.py`, `evaluate_fsi_model.py`, `passbook_parser_benchmark.py`) | Local / Cloud Shell CPU (`python3` standard library) | 5 seconds | **$0.00 (`₹0`)** | Free |
+| **Lab 2: Sovereign KMS & Storage** (`01_setup_sovereign_infra.sh`) | 1x Cloud KMS CMEK key + Regional GCS Bucket (~15 MB data) + Artifact Registry | Kept during lab | **~$0.06 / month (`~₹5 / mo`)** | KMS keys cost $0.06/month per active version; GCS storage for a few MB is `< $0.01`. |
+| **Lab 3: Serverless QLoRA Fine-Tuning** (`02_submit_vertex_finetuning.sh`) | Vertex AI Custom Job: `g2-standard-12` (**1x NVIDIA L4 24GB GPU** + 12 vCPUs + 200GB SSD) | **~22–32 minutes** | **~$0.45 – $0.70 (`~₹40 – ₹60`)** *per run* | **Auto-terminates!** Vertex AI provisions the GPU VM, runs training, saves weights to GCS, and **destroys the GPU VM automatically** the second training finishes. |
+| **Lab 5A: Serving on Cloud Run GPU** (`DEPLOY_TARGET=cloudrun` in `03_deploy_sovereign_vllm.sh`) | Cloud Run Service with **1x NVIDIA L4 GPU** (`--min-instances=0`) | ~15 mins of active testing | **~$0.20 – $0.30 (`~₹18 – ₹25`)** | **Scales to zero (`$0/hr`)** when no requests are being sent! |
+| **Lab 5B: Serving on Vertex AI Endpoint** (`DEPLOY_TARGET=vertex` in `03_deploy_sovereign_vllm.sh`) | Dedicated `g2-standard-12` (**1x NVIDIA L4 GPU**) online endpoint | ~30 mins of testing | **~$1.15 / hour (`~₹98 / hr`)** | ⚠️ **Bills continuously every hour it stays deployed**, even if you send zero requests! |
+| **Lab 6: Mandatory Cleanup** (`99_cleanup_resources.sh --confirm`) | Undeploys endpoints, deletes models, buckets, and Artifact Registry | 1 minute | **$0.00 (`₹0`)** | Stops all ongoing compute and storage charges immediately. |
+
+> [!CAUTION]
+> **The #1 Billing Trap to Avoid**:
+> - **Training Jobs (`Lab 3`) shut down automatically** when training completes — they will never bill you overnight.
+> - **Vertex AI Endpoints (`Lab 5B`) and Colab Enterprise / Workbench GPU Notebooks (`Lab 4`) DO NOT shut down automatically** by default. Leaving one `g2-standard-12` endpoint deployed overnight costs `~$1.15/hr × 24h ≈ $27.60/day (~₹2,350/day)`. **Always run `./scripts/99_cleanup_resources.sh --confirm` as soon as you finish testing.**
+
+---
 
 ## Table of Contents
 
@@ -36,11 +74,13 @@ Fine-tuning is **not** always the right answer. Before spending a rupee of GPU b
 - 🧭 [**End-to-End Runbook**](docs/02_END_TO_END_RUNBOOK.md) — all 8 lab steps with expected output, timings, costs, troubleshooting & cleanup
 
 **This document:**
-1. [Executive Summary: Why Digital Sovereignty Dictates Open-Weight Models in Indian FSI](#1-executive-summary-why-digital-sovereignty-dictates-open-weight-models-in-indian-fsi)
+- [📋 Prerequisites Before Running This Lab (5-Minute Checklist)](#-prerequisites-before-running-this-lab-5-minute-checklist)
+- [💰 What Will This Lab Cost Me? (Exact USD & INR Billing Breakdown)](#-what-will-this-lab-cost-me-exact-usd--inr-billing-breakdown)
+1. [Executive Summary: Why Digital Sovereignty Dictates Open-Weight Gemma 4 in Indian FSI](#1-executive-summary-why-digital-sovereignty-dictates-open-weight-models-in-indian-fsi)
 2. [Zero-Local-Docker & Zero-UV Architecture: Working Around Corporate Laptop Restrictions](#2-zero-local-docker--zero-uv-architecture-working-around-corporate-laptop-restrictions)
 3. [Module 1 (Theory): Regulatory Mapping — RBI & SEBI Mandates to Google Cloud Controls](#3-module-1-theory-regulatory-mapping--rbi--sebi-mandates-to-google-cloud-controls)
-4. [Module 2 (Theory): Inside the Gemma 2 & Gemma 3 Neural Architecture](#4-module-2-theory-inside-the-gemma-2--gemma-3-neural-architecture)
-5. [Module 3 (Theory): Fine-Tuning Mathematics — Full FT vs. LoRA vs. 4-Bit NF4 QLoRA & GPU Sizing](#5-module-3-theory-fine-tuning-mathematics--full-ft-vs-lora-vs-4-bit-nf4-qlora--gpu-sizing)
+4. [Module 2 (Architecture): Inside the Latest Gemma 4 Model Family (Plus Gemma 3 & 2)](#4-module-2-architecture-inside-the-latest-gemma-4-model-family-plus-gemma-3--2)
+5. [Module 3 (Applied AI Guide): How QLoRA Fits a Massive Model Onto One $0.70 GPU (Simplified)](#5-module-3-applied-ai-guide-how-qlora-fits-a-massive-model-onto-one-070-gpu-simplified)
 6. [Module 4 (Theory): Synthetic FSI Data Engineering & Teacher-Student Distillation](#6-module-4-theory-synthetic-fsi-data-engineering--teacher-student-distillation)
 7. [Module 5 (Theory): Sovereign Production Serving — vLLM PagedAttention, GKE, Vertex AI & Cloud Run GPU](#7-module-5-theory-sovereign-production-serving--vllm-pagedattention-gke-vertex-ai--cloud-run-gpu)
 8. [Hands-On Bootcamp Lab 1: Generating & Auditing the 1,500-Example Indian FSI Dataset](#8-hands-on-bootcamp-lab-1-generating--auditing-the-1500-example-indian-fsi-dataset)
@@ -50,7 +90,7 @@ Fine-tuning is **not** always the right answer. Before spending a rupee of GPU b
 12. [Hands-On Bootcamp Lab 5: Statistical Benchmark Evaluation & Sovereign vLLM Deployment](#12-hands-on-bootcamp-lab-5-statistical-benchmark-evaluation--sovereign-vllm-deployment)
 13. [Module 8 (Theory & Lab): Evaluation-Driven Development ("Evals") & Iterative "Hillclimbing" in FSI](#13-module-8-theory--lab-evaluation-driven-development-evals--iterative-hillclimbing-in-fsi)
 14. [Module 9 (Deep-Dive Encyclopedia): Understanding Every GenAI Fine-Tuning Hyperparameter](#14-module-9-deep-dive-encyclopedia-understanding-every-genai-fine-tuning-hyperparameter)
-15. [Module 10 (Practical Operations): Running the Notebook on GCP & Handling India GPU Stockouts / Region Switching](#15-module-10-practical-operations-running-the-notebook-on-gcp--handling-india-gpu-stockouts--region-switching)
+15. [Module 10 (Practical Operations): Running the Notebook on GCP & Handling India GPU Stockouts / Region Switching](#15-module-10-practical-operations-running-the-notebook-on-gcp--handling-gpu-stockouts--region-switching)
 16. [Module 11 (Mandatory): Cleanup, Teardown & Cost Control](#16-module-11-mandatory-cleanup-teardown--cost-control)
 
 ---
@@ -66,11 +106,11 @@ When a bank or fintech evaluates closed, proprietary SaaS LLM endpoints, Chief I
 3. **Lack of Cryptographic Key Ownership over Model Memory**: Banks require **Customer-Managed Encryption Keys (CMEK)** via Cloud KMS or Hardware Security Modules (Cloud HSM) over both data at rest and model weights.
 4. **Inability to Air-Gap Execution**: Tier-1 banks mandate that production inference runs inside an isolated network perimeter (**VPC Service Controls**) with **zero public internet egress**.
 
-### How Open-Weight Gemma on Google Cloud Solves the Sovereignty Dilemma
-By combining **Google's open-weight Gemma family (Gemma 2 9B/27B and Gemma 3 12B/27B)** with **Google Cloud's Mumbai (`asia-south1`) and Delhi (`asia-south2`) infrastructure**, architects deliver **100% Digital Sovereignty**:
-- **Immutable Weight Ownership**: The base Gemma weights and fine-tuned LoRA adapters reside as `.safetensors` files inside the bank's own CMEK-encrypted Cloud Storage bucket in Mumbai.
+### How Open-Weight Gemma 4 on Google Cloud Solves the Sovereignty Dilemma
+By combining **Google's latest open-weight Gemma 4 family (`google/gemma-4-12B-it`, `google/gemma-4-E4B-it`, `google/gemma-4-26B-A4B-it`, `google/gemma-4-31B-it`)** with **Google Cloud's Mumbai (`asia-south1`) and Delhi (`asia-south2`) infrastructure**, architects deliver **100% Digital Sovereignty**:
+- **Immutable Weight Ownership**: The base Gemma 4 weights and fine-tuned LoRA adapters reside as `.safetensors` files inside the bank's own CMEK-encrypted Cloud Storage bucket in Mumbai.
 - **Zero Data Exfiltration**: Fine-tuning and inference run on dedicated NVIDIA L4 / A100 GPUs inside a **VPC Service Controls (VPC-SC)** perimeter with **Private Service Connect (PSC)**.
-- **Deterministic Compliance Lineage**: Every fine-tuned model checkpoint is versioned in **Vertex AI Model Registry (`asia-south1`)** with SHA-256 dataset hashes for RBI/SEBI inspection audits.
+- **Deterministic Compliance Lineage**: Every fine-tuned model checkpoint is versioned in **Vertex AI Model Registry (`asia-south1`)** with SHA-256 dataset hashes (`data/data_card.json`) and an automatic `MODEL_CARD.md` for RBI/SEBI inspection audits.
 
 ![Sovereign Gemma fine-tuning reference architecture inside a bank VPC Service Controls perimeter in asia-south1 Mumbai: Cloud KMS CMEK encrypts a Cloud Storage bucket, a Vertex AI g2-standard-12 NVIDIA L4 QLoRA training job, and a private vLLM serving endpoint fed by Vertex AI Model Registry](docs/images/01_sovereign_architecture.jpg)
 
@@ -103,91 +143,117 @@ When presenting this architecture to a Bank CISO, CTO, or RBI Inspection Auditor
 | :--- | :--- | :--- |
 | **RBI Storage of Payment System Data (Apr 2018)** (`RBI/2017-18/153 DPSS.CO.OD No.2785/06.08.005/2017-2018`) | Entire payment data & end-to-end transaction details must be stored strictly within India. | Organization Policy `constraints/gcp.resourceLocations` locked to `in-locations` (`asia-south1` Mumbai, `asia-south2` Delhi). |
 | **RBI Digital Lending Guidelines (Sep 2022 & Jun 2023 FLDG)** (`RBI/2022-23/111 DOR.CRE.REC.66/21.07.001/2022-23`) | Explicit Key Fact Statement (KFS) APR disclosure, 5% FLDG cap, direct RE-to-borrower fund flow, explicit borrower consent audit trail. | Fine-tuned Gemma model trained specifically on KFS APR math and FLDG 5% compliance rules; logs stored in immutable Cloud Audit Logs. |
-| **RBI FREE-AI Framework (2024/2025)** (*Responsible & Ethical Enablement of AI in Financial Sector*) | Deterministic model explainability, protection against unannounced model drift, and full model weight lineage. | Open-weight Gemma 2/3 frozen & fine-tuned with QLoRA; model artifacts stored in customer GCS bucket with SHA-256 checksums in Vertex AI Model Registry. |
+| **RBI FREE-AI Framework (2024/2025)** (*Responsible & Ethical Enablement of AI in Financial Sector*) | Deterministic model explainability, protection against unannounced model drift, and full model weight lineage. | Open-weight Gemma 4 frozen & fine-tuned with QLoRA; model artifacts stored in customer GCS bucket with SHA-256 checksums in Vertex AI Model Registry. |
 | **SEBI Cloud Framework for Regulated Entities (2023)** (`SEBI/HO/ITD/ITD_VAPT/P/CIR/2023/033`) | Cryptographic key ownership (BYOK/CMEK), strict multi-tenant isolation, and zero unauthorized access by cloud provider personnel. | **Cloud KMS / Cloud HSM CMEK** applied to GCS buckets, Artifact Registry, Vertex AI Custom Training boot/shuffle disks, and Endpoints + **Access Transparency** logs. |
 | **NPCI Unified Dispute & Issue Resolution (UDIR) & RBI TAT Circular** (`RBI/2019-20/67`) | Automated T+1 / T+5 turnaround time enforcement and proactive `₹100/day` delay compensation to customers. | Gemma fine-tuned on NPCI UDIR reason codes (`UDIR-01` to `UDIR-14`) to auto-calculate exact principal + `₹100/day` penalty ledger vouchers. |
 
 ---
 
-## 4. Module 2 (Theory): Inside the Gemma 2 & Gemma 3 Neural Architecture
+## 4. Module 2 (Architecture): Inside the Latest Gemma 4 Model Family (Plus Gemma 3 & 2)
 
-To fine-tune Gemma effectively for financial reasoning, an architect must understand four unique architectural innovations built into **Gemma 2 (2B, 9B, 27B)** and **Gemma 3 (4B, 12B, 27B)**:
+Yes — **this repository uses the latest Gemma 4 model family by default**, while maintaining full backward compatibility with Gemma 3 and Gemma 2.
 
-### 1. Alternating Local Sliding Window & Global Attention
-Standard Transformers suffer from quadratic memory growth $\mathcal{O}(L^2)$ in the attention matrix as sequence length $L$ increases.
-- Gemma 2 interleaves **Local Sliding Window Attention** (window size $W = 4096$ tokens) with **Global Attention** every other layer (1:1 ratio in Gemma 2; 5:1 ratio in Gemma 3 with 128K context).
-- **Architectural Impact for FSI**: Long regulatory circulars, 10-page loan agreements, or multi-transaction ISO-20022 XML batches can be processed with **up to 60% lower KV-Cache memory footprint** during both QLoRA training and vLLM inference.
+### Which Gemma 4 Model Should You Pick?
 
-### 2. Attention Logit Soft-Capping
-During domain-specific fine-tuning on structured financial text (like XML tags or JSON tables), standard attention logits can grow excessively large, causing gradient exploding or attention entropy collapse.
-- Gemma applies a smooth hyperbolic tangent soft-cap to attention logits before the Softmax operation (and at the final LM output head):
-  $$\text{logits}_{\text{capped}} = \text{soft\_cap} \times \tanh\left(\frac{\text{logits}}{\text{soft\_cap}}\right)$$
-  where $\text{soft\_cap} = 50.0$ for attention layers and $30.0$ for the final layer.
-- **Crucial Fine-Tuning Rule**: Always use `torch.bfloat16` (not `float16`) on NVIDIA L4 / A100 GPUs. `float16` has a narrower dynamic range that can underflow/overflow inside the $\tanh$ soft-capping derivative during backpropagation, whereas `bfloat16` preserves the exact dynamic range of `float32`.
+| Model Checkpoint (`BASE_MODEL_ID`) | What It Is | Best Indian FSI Use Case | Fits on 1x L4 (24GB)? |
+| :--- | :--- | :--- | :--- |
+| **`google/gemma-4-12B-it`** *(Default)* | **Gemma 4 12B Unified** (Apache 2.0, encoder-free multimodal & text reasoning) | **Primary production sweet spot** for multi-domain RBI/SEBI/NPCI regulatory compliance and KFS APR math. | ✅ **Yes (`~13.8 GB` VRAM)** |
+| **`google/gemma-4-E4B-it`** *(Fastest)* | **Gemma 4 Effective-4B** (Compact unified model with extended embedding table) | **High-volume structured JSON extraction** (e.g., parsing millions of bank passbook lines) or running on lower-cost GPUs (`T4` / `1x L4`). | ✅ **Yes (`~9.5 GB` VRAM)** |
+| **`google/gemma-4-26B-A4B-it`** *(MoE)* | **Gemma 4 Mixture-of-Experts**: 26B total parameters, but **only 4B active per token** | **Low-latency real-time APIs** (UPI dispute routing) needing 26B regulatory depth at 4B inference speed. | ✅ **Yes (`~18.2 GB` VRAM)** |
+| **`google/gemma-4-31B-it`** *(Flagship)* | **Gemma 4 31B Dense** Flagship | Complex multi-document SEBI DRHP or corporate credit underwriting memos. | Needs **2x L4 (48GB)** or **1x A100** |
 
-### 3. Pre-Norm AND Post-Norm RMSNorm Placement
-Unlike Llama models which only apply Root Mean Square Layer Normalization (`RMSNorm`) *before* the attention and MLP blocks, Gemma applies `RMSNorm` **both before AND after** every attention and feed-forward sub-layer. This stabilizes activation magnitudes across deep layers when adapting to dense financial tables.
+> [!NOTE]
+> **Why `google/gemma-4-12B-it` / `E4B-it` instead of `EmbeddingGemma 2`?**
+> In Google's release timeline, **Gemma 4** is the current core *generative* open-weight family (`-it` = instruction-tuned). `EmbeddingGemma 2` is a vector embedding model for RAG search, not a text-generation model.
 
-### 4. SentencePiece 256,000 Vocabulary Tokenization & Exact Chat Template
-Gemma uses a massive **256K vocabulary** SentencePiece tokenizer.
-- Indian currency symbols (`₹`), Indian numbering conventions (`Crore`, `Lakh`), IFSC prefixes (`SBIN`, `HDFC`, `ICIC`), and regulatory acronyms (`CKYCR`, `PMLA`, `FLDG`, `ASBA`) are represented as compact tokens without character-level fragmentation.
-- **Strict Chat Turn Formatting**: Gemma instruct models (`-it`) do **not** use `<|im_start|>` or `[INST]`. They strictly require `<start_of_turn>` and `<end_of_turn>` control tokens:
-  ```text
-  <start_of_turn>user
-  You are a Principal Financial Regulatory AI Assistant...
-  [User Instruction / Regulatory Scenario]<end_of_turn>
-  <start_of_turn>model
-  [Structured Regulatory Determination & Runbook]<end_of_turn>
-  ```
-  *Note: In Gemma 2, there is no separate `system` role turn; the system instructions are prepended directly inside the first `user` turn, exactly as implemented in `data/generate_fsi_dataset.py`.*
+### 4 Practical Things Applied AI Engineers Need to Know About Gemma 4
+1. **Multimodal Unified Architecture (`LM_ALL_PROJ`)**: Gemma 4 checkpoints (`12B-it`, `E4B-it`) use `AutoModelForMultimodalLM` and contain vision/audio layers alongside the language model. When fine-tuning on text, our script [`training/train_gemma_qlora.py`](training/train_gemma_qlora.py) uses a regex (`^model\.language_model\..*\.(q|k|v|o|gate|up|down)_proj$`) so LoRA adapters are attached **only to the language backbone**, avoiding wasted memory on unused vision/audio towers.
+2. **Disabling "Thinking" Mode for Deterministic JSON (`enable_thinking=False`)**: Gemma 4 supports an optional chain-of-thought thinking mode (`<|think|>`). For strict JSON extraction and low-latency banking APIs, we pass `enable_thinking=False` in both training and [`evaluation/predict_endpoint.py`](evaluation/predict_endpoint.py) so the model emits clean, deterministic responses immediately.
+3. **Always Use `bfloat16` (Never `float16`)**: Gemma uses *Attention Logit Soft-Capping* (clamping extreme scores with $\tanh$). Older `float16` format can overflow during training; `bfloat16` (supported natively on NVIDIA L4 and A100 GPUs) prevents `NaN` training crashes.
+4. **256K Vocabulary Built for India**: Gemma's 256,000-token vocabulary natively understands `₹`, `Crore`, `Lakh`, Hinglish phrases (`"paise kat gaye"`), and banking codes (`SBIN`, `HDFC`, `UPI`, `NEFT`) without splitting words into individual letters.
 
 ---
 
-## 5. Module 3 (Theory): Fine-Tuning Mathematics — Full FT vs. LoRA vs. 4-Bit NF4 QLoRA & GPU Sizing
+## 5. Module 3 (Applied AI Guide): How QLoRA Fits a Massive Model Onto One $0.70 GPU (Simplified)
 
-### Why Full Fine-Tuning is Cost-Prohibitive for 9B / 27B Models
-Let $\Phi$ be the number of parameters in a Transformer model (for **Gemma-2-9B**, $\Phi = 9.24 \times 10^9$).
-In standard Mixed-Precision Full Fine-Tuning with the **AdamW** optimizer, GPU VRAM must store:
-1. **Model Weights ($\text{BF16}$)**: $2 \text{ bytes} \times \Phi = 18.5 \text{ GB}$
-2. **Gradients ($\text{BF16}$)**: $2 \text{ bytes} \times \Phi = 18.5 \text{ GB}$
-3. **AdamW Optimizer States ($\text{FP32}$ Master Weights + First Moment $m_t$ + Second Moment $v_t$)**: $(4 + 4 + 4) = 12 \text{ bytes} \times \Phi = 110.9 \text{ GB}$
-4. **Forward Activations & KV Cache**: $\approx 15\text{--}30 \text{ GB}$
-$$\text{Total Full Fine-Tuning VRAM (Gemma-2-9B)} \approx 18.5 + 18.5 + 110.9 + 20 = \mathbf{167.9 \text{ GB VRAM}}$$
-This exceeds even an 80 GB NVIDIA A100/H100 GPU, requiring a multi-GPU node (`a2-megagpu-16g` or multi-node FSDP).
+> **You do NOT need to be an ML Scientist to understand or run this.** If you are an Applied AI Engineer or Cloud Architect, here is the entire mental model of **Full Fine-Tuning vs. LoRA vs. QLoRA** in plain English.
 
-### How LoRA (Low-Rank Adaptation) Compresses Trainable Parameters by 99.4%
-Instead of updating the pre-trained weight matrix $W_0 \in \mathbb{R}^{d \times k}$, **LoRA** (Hu et al., 2021) freezes $W_0$ completely and injects a low-rank decomposition $\Delta W = B A$, where $B \in \mathbb{R}^{d \times r}$ and $A \in \mathbb{R}^{r \times k}$ with rank $r \ll \min(d, k)$:
-$$h = W_0 x + \frac{\alpha}{r} B A x$$
-- Matrix $A$ is initialized from a Gaussian distribution $\mathcal{N}(0, \sigma^2)$ and $B$ is initialized to $0$, so $\Delta W = 0$ at step $t=0$ (preserving exact pre-trained behavior at the start of training).
-- The scaling factor $\frac{\alpha}{r}$ (typically $\alpha = 2r$, e.g., $r = 16, \alpha = 32$) stabilizes gradient updates when tuning rank $r$.
-- **Target Modules Rule**: In early LoRA papers, only query/value projections (`q_proj`, `v_proj`) were targeted. Modern empirical research (Dettmers et al., 2023) proves that **targeting all 7 linear layers** (`q_proj`, `k_proj`, `v_proj`, `o_proj`, `gate_proj`, `up_proj`, `down_proj`) is mandatory to match full fine-tuning accuracy on complex financial reasoning.
-- For Gemma-2-9B with $r=16$ across all 7 linear modules, the number of trainable parameters drops from $9.24\text{B}$ to **$54.0\text{M}$ (just 0.58% of total parameters!)**.
+### The Problem: Why "Full Fine-Tuning" Is Way Too Expensive
+Imagine **`google/gemma-4-12B-it`** as a **24 GB digital encyclopedia** containing 12 billion numbers ("weights").
+- If you try to **rewrite all 12 billion numbers** during training (*Full Fine-Tuning*), the GPU cannot just hold the 24 GB model. It also has to keep multiple full-size "scratchpad copies" in memory at the exact same time to track undo history, momentum, and gradients.
+- **Result**: A 24 GB model suddenly demands **~196 GB of GPU memory (VRAM)**! That won't fit on a standard 24 GB NVIDIA L4 GPU—you would have to rent 4 to 8 expensive A100/H100 GPUs (`~$15–$30/hour`).
+
+---
+
+### The Solution: Two Simple Tricks That Shrink 196 GB Down to ~13.8 GB
+
+**QLoRA** combines two practical engineering tricks so the entire training job fits comfortably inside **one $0.70/hr NVIDIA L4 GPU (24 GB VRAM)**:
+
+#### Trick 1: LoRA = "Put Sticky Notes on a Frozen Textbook"
+Instead of rewriting the 24 GB encyclopedia, we **lock (freeze) 100% of the base model weights** so they are read-only.
+- Next to each layer of the frozen model, we attach a tiny, trainable **"sticky note" adapter** (called a **LoRA adapter**).
+- While training on your Indian FSI examples, **only the sticky notes get updated**.
+- Because the sticky notes are tiny (**less than 1% of the size of the full model** — roughly `~140 MB` instead of `24 GB`), the GPU no longer needs 150+ GB of optimizer scratchpad memory!
+- **When training finishes**: Our script runs `--merge-weights`, which permanently bakes the sticky notes back into the main model so production inference has **zero extra latency**.
 
 ![LoRA low-rank decomposition explained visually: the frozen pre-trained weight matrix W0 of shape d by k sits beside two small trainable matrices, A of shape r by k and B of shape d by r, whose product BA is scaled by alpha over r and added to the frozen output, shrinking trainable parameters from 9.24 billion to 54 million](docs/images/03_lora_math_explained.jpg)
 
-### How 4-Bit NormalFloat (NF4) QLoRA Shrinks Memory to 11.8 GB
-**QLoRA** (Dettmers et al., 2023) goes one step further by quantizing the frozen base model weights $W_0$ from 16-bit (`2 bytes/param`) down to **4-bit NormalFloat (`NF4`)**:
-1. **Information-Theoretically Optimal NF4 Quantization**: Neural network pre-trained weights follow a zero-centered normal distribution $\mathcal{N}(0, \sigma^2)$. NF4 spaces its $2^4 = 16$ quantization bins so that each bin contains an equal area under the standard normal cumulative distribution function (CDF).
-2. **Double Quantization (DQ)**: Quantizes the quantization scaling constants themselves from FP32 to FP8, saving an additional $0.37\text{ bits/parameter}$ ($\approx 0.45\text{ GB}$ on 9B).
-3. **Paged 8-Bit AdamW Optimizer**: Uses NVIDIA Unified Memory to automatically page optimizer states between GPU VRAM and CPU RAM during sudden activation spikes.
-4. **On-the-Fly Dequantization**: During the forward and backward pass, the frozen NF4 base weights $W_0^{\text{NF4}}$ are dequantized on-the-fly into `bfloat16` Tensor Core registers to compute matrix multiplication with input activations $x$, while gradients flow strictly through the `bfloat16` LoRA matrices $B$ and $A$.
+#### Trick 2: 4-Bit Quantization ("Q" in QLoRA) = "ZIP-Compress the Frozen Textbook by 4x"
+Even if we don't update the frozen 24 GB base model, just *holding* 24 GB in a 24 GB L4 GPU leaves zero room for your training data!
+- Since the base model is read-only during LoRA training, we don't need to store its frozen numbers in full 16-bit precision (`2 bytes per number`).
+- **QLoRA compresses the frozen base model down to 4-bit precision (`NF4`)** when loading it into GPU memory. That shrinks the frozen base model by **75%** (from `~24 GB` down to **`~6.5 GB`**!).
+- Meanwhile, your trainable **LoRA sticky notes stay in crisp 16-bit (`bfloat16`) precision**, so your fine-tuned accuracy matches full fine-tuning.
 
 ![QLoRA GPU memory budget comparison: full fine-tuning of Gemma-3-12B needs roughly 196 GB across weights, gradients and AdamW optimizer states, while 4-bit NF4 QLoRA fits in about 13.4 GB — 6.5 GB quantized base weights, 0.14 GB LoRA adapter, 0.28 GB paged 8-bit optimizer state and 6.5 GB activations — comfortably inside one 24 GB NVIDIA L4](docs/images/04_qlora_memory_budget.jpg)
 
-### Google Cloud GPU Sizing & Cost Matrix Across All Gemma Generations (`asia-south1` Mumbai)
+---
 
-| Gemma Generation & Model ID | Architecture & Context | Fine-Tuning Method | Peak VRAM Required | Recommended GCP Machine SKU (`asia-south1`) | Attached GPU Hardware | Approx. Training Time (1,500 Examples, 3 Epochs) | Approx. Compute Cost / Run |
-| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **`google/gemma-4-26b-a4b-it`** *(2026 Flagship MoE)* | **Mixture-of-Experts**: 26B Total / **4B Active per token** | **4-Bit QLoRA** ($r=16$) | **~18.2 GB** | `g2-standard-12` (or `g2-standard-24`) | **1x NVIDIA L4 (24 GB)** *(or 2x L4)* | ~22 minutes *(4B active compute speed!)* | **~$0.45** |
-| **`google/gemma-4-31b-it`** *(2026 Flagship Dense)* | **Dense 31B** Flagship Reasoning | **4-Bit QLoRA** ($r=16$) | **~24.8 GB** | `g2-standard-24` or `a2-highgpu-1g` | **2x NVIDIA L4 (48 GB)** or **1x A100 (40 GB)** | ~45 minutes | **~$1.55** |
-| **`google/gemma-3-12b-it`** *(Default Sweet Spot)* | **Dense 12B** Multimodal + **128K Context** (5:1 Local/Global) | **4-Bit QLoRA** ($r=16$) | **~13.4 GB** | `g2-standard-12` | **1x NVIDIA L4 (24 GB)** | ~32 minutes | **~$0.62** |
-| **`google/gemma-3-27b-it`** *(Long-Context Enterprise)* | **Dense 27B** Multimodal + **128K Context** | **4-Bit QLoRA** ($r=16$) | **~22.4 GB** | `g2-standard-24` | **2x NVIDIA L4 (48 GB)** | ~42 minutes | **~$1.45** |
-| **`google/gemma-2-9b-it`** *(Foundational Dense)* | **Dense 9B** (1:1 Local/Global + Logit Soft-Capping) | **4-Bit QLoRA** ($r=16$) | **~11.8 GB** | `g2-standard-12` | **1x NVIDIA L4 (24 GB)** | ~28 minutes | **~$0.55** |
-| **`google/gemma-3-12b-it`** | Dense 12B | **Full Fine-Tuning** (BF16) | **~196.0 GB** | `a2-megagpu-16g` or `a3-highgpu-4g` | **4x A100 (80 GB)** or **4x H100 (80 GB)** | ~20 minutes | **~$9.50+** |
+### The Only 5 Knobs You Ever Touch in Applied AI
 
-> **Principal Architect Takeaway on Gemma 4 MoE (`gemma-4-26b-a4b-it`) vs. Gemma 3 (`gemma-3-12b-it`)**:
-> - **`gemma-4-26b-a4b-it` (Mixture-of-Experts)** is the ultimate breakthrough for high-throughput Indian FSI production serving (e.g., real-time UPI dispute classification or high-frequency SEBI order compliance). Because it stores **26B parameters of regulatory knowledge** in VRAM (`~14 GB` in 4-bit / `~18.2 GB` during QLoRA training) but **only routes each token through 4B active parameters**, it achieves **sub-20ms Time-to-First-Token (TTFT) latency** on a single NVIDIA L4 GPU in Mumbai (`asia-south1`)!
-> - **`gemma-3-12b-it`** is the ideal choice when your Indian FSI workflow requires **128K long-context window processing** (e.g., ingesting entire 80-page SEBI Draft Red Herring Prospectuses [DRHPs] or multi-year MSME Account Aggregator bank statement XML histories) on a single 24 GB NVIDIA L4 GPU.
+When running [`training/train_gemma_qlora.py`](training/train_gemma_qlora.py), you don't need to tune 50 academic knobs. Here are the **5 practical settings** and what they actually do:
+
+| CLI Flag in `train_gemma_qlora.py` | Default Value | Plain-English Meaning ("What does this knob do?") | When Should You Change It? |
+| :--- | :--- | :--- | :--- |
+| **`--lora-r`** *(Rank)* | `16` | **How big the "sticky note" is.** Higher `r` gives the adapter more capacity to learn complex rules, but uses slightly more memory. | Use `8` or `16` for single-task JSON formatting (like passbook parsing); use `16` or `32` for multi-domain regulatory reasoning. |
+| **`--lora-alpha`** *(Scaling)* | `32` | **How loud the sticky note's voice is** compared to the frozen base model. | **Rule of thumb**: Always set `lora-alpha = 2 × lora-r` (if `r=16`, set `alpha=32`). Rarely needs manual tuning. |
+| **`--epochs`** | `3` | **How many times the model reads your training dataset** from start to finish. | `2–3` epochs is the sweet spot for 1,000–5,000 examples. More than `4` epochs risks memorizing ("overfitting") the training phrasing. |
+| **`--learning-rate`** | `2e-4` (`0.0002`) | **How big a step the model takes** after each batch of examples. | Keep at `2e-4` for `r=16`, or `1e-4` for smaller adapters (`r=8`). |
+| **`--merge-weights`** | Enabled | **Bakes the sticky notes back into a clean 16-bit model** at the end of the job so vLLM can serve it directly. | Always keep enabled when deploying a dedicated model to Vertex AI or Cloud Run GPU. |
+
+---
+
+### Which GPU Machine Should I Pick on Google Cloud? (`asia-south1` Mumbai)
+
+| Gemma Model (`BASE_MODEL_ID`) | Why Choose This Model? | Peak GPU Memory (QLoRA) | GCP Machine Type | GPU Attached | Training Time (1,500 rows) | Cost per Training Run |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| **`google/gemma-4-E4B-it`** | Fastest & lightest Gemma 4; ideal for structured JSON / passbook parsing | **~9.5 GB** | `g2-standard-12` | **1x NVIDIA L4 (24 GB)** | ~18 mins | **~$0.38 (`~₹32`)** |
+| **`google/gemma-4-12B-it`** *(Default)* | Best all-around Gemma 4 Unified model for RBI/SEBI compliance & math | **~13.8 GB** | `g2-standard-12` | **1x NVIDIA L4 (24 GB)** | ~30 mins | **~$0.62 (`~₹52`)** |
+| **`google/gemma-4-26B-A4B-it`** | Mixture-of-Experts (26B knowledge, 4B active speed) for ultra-low latency | **~18.2 GB** | `g2-standard-12` *(or `24`)* | **1x NVIDIA L4 (24 GB)** | ~22 mins | **~$0.45 (`~₹38`)** |
+| **`google/gemma-4-31B-it`** | Largest Dense 31B flagship for heavy multi-document legal/credit analysis | **~24.8 GB** | `g2-standard-24` | **2x NVIDIA L4 (48 GB)** | ~45 mins | **~$1.55 (`~₹130`)** |
+| **`google/gemma-3-12b-it`** | Legacy Gemma 3 12B (128K long-context window) | **~13.4 GB** | `g2-standard-12` | **1x NVIDIA L4 (24 GB)** | ~32 mins | **~$0.62 (`~₹52`)** |
+
+<details>
+<summary><b>🔬 Optional Deep-Dive: Exact VRAM & LoRA Equations (Click to expand if you want the ML math)</b></summary>
+
+<br/>
+
+#### 1. Why Full Fine-Tuning Requires ~168–196 GB VRAM
+Let $\Phi$ be the number of parameters in the model (e.g., $\Phi \approx 12 \times 10^9$). Standard Mixed-Precision Full Fine-Tuning with AdamW stores:
+- **Model Weights ($\text{BF16}$)**: $2 \text{ bytes} \times \Phi$
+- **Gradients ($\text{BF16}$)**: $2 \text{ bytes} \times \Phi$
+- **AdamW Optimizer States ($\text{FP32}$ master copy + momentum $m_t$ + variance $v_t$)**: $12 \text{ bytes} \times \Phi$
+- **Activations & KV Cache**: $\approx 15\text{--}30 \text{ GB}$
+Total VRAM exceeds $16 \text{ bytes} \times \Phi + \text{activations} \approx 196 \text{ GB}$.
+
+#### 2. Low-Rank Adaptation (LoRA) Equation
+Instead of updating $W_0 \in \mathbb{R}^{d \times k}$, LoRA freezes $W_0$ and learns two low-rank matrices $B \in \mathbb{R}^{d \times r}$ and $A \in \mathbb{R}^{r \times k}$ where $r \ll \min(d, k)$:
+$$h = W_0 x + \frac{\alpha}{r} B A x$$
+At initialization, $A \sim \mathcal{N}(0, \sigma^2)$ and $B = 0$, so $\Delta W = B A = 0$ at step 0.
+
+#### 3. 4-Bit NormalFloat (`NF4`) + Double Quantization
+Pre-trained neural network weights follow a zero-centered normal distribution. `NF4` places its 16 quantization bins so each bin covers an equal area under the standard normal distribution, and Double Quantization compresses the quantization scales themselves from FP32 to FP8. During the forward/backward pass, `NF4` weights are dequantized on the fly into `bfloat16` registers for matrix multiplication while gradients flow only through $B$ and $A$.
+
+</details>
 
 ---
 

@@ -236,14 +236,14 @@ def parse_args():
     parser.add_argument(
         "--model-id",
         type=str,
-        default="google/gemma-3-12b-it",
+        default="google/gemma-4-12B-it",
         help=(
-            "HuggingFace Model ID or GCS URI. Supported models:\n"
-            "  - google/gemma-4-26b-a4b-it (Gemma 4 MoE: 26B total / 4B active)\n"
-            "  - google/gemma-4-31b-it     (Gemma 4 Dense 31B Flagship)\n"
-            "  - google/gemma-4-12B-it     (Gemma 4 12B Unified)\n"
-            "  - google/gemma-4-E4B-it     (Gemma 4 E4B Effective 4B)\n"
-            "  - google/gemma-3-12b-it     (Gemma 3 12B 128K Context - Default)\n"
+            "HuggingFace Model ID or GCS URI. Supported models (Gemma 4 default):\n"
+            "  - google/gemma-4-12B-it     (Gemma 4 12B Unified - Default)\n"
+            "  - google/gemma-4-E4B-it     (Gemma 4 E4B Effective 4B - Fast single-L4)\n"
+            "  - google/gemma-4-26B-A4B-it (Gemma 4 MoE: 26B total / 4B active)\n"
+            "  - google/gemma-4-31B-it     (Gemma 4 Dense 31B Flagship)\n"
+            "  - google/gemma-3-12b-it     (Gemma 3 12B 128K Context)\n"
             "  - google/gemma-3-27b-it     (Gemma 3 27B 128K Context)\n"
             "  - google/gemma-2-9b-it      (Gemma 2 9B Dense)"
         ),

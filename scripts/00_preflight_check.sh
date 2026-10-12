@@ -115,7 +115,7 @@ if [[ -n "${L4_QUOTA}" && "${L4_QUOTA%.*}" -gt 0 ]]; then
   ok "NVIDIA L4 GPU quota in ${REGION}: ${L4_QUOTA%.*} (you need 1). Recommended path."
 elif [[ -n "${T4_QUOTA}" && "${T4_QUOTA%.*}" -gt 0 ]]; then
   warn "No L4 quota, but NVIDIA T4 quota is ${T4_QUOTA%.*} in ${REGION}."
-  echo "         -> Use a T4 and a smaller model: export BASE_MODEL_ID=google/gemma-3-4b-it"
+  echo "         -> Use a T4 and the compact Gemma 4 E4B model: export BASE_MODEL_ID=google/gemma-4-E4B-it"
   echo "            export MACHINE_TYPE=n1-standard-8 ACCELERATOR_TYPE=NVIDIA_TESLA_T4"
 else
   warn "No GPU quota detected in ${REGION}. You have three options:"
@@ -129,15 +129,15 @@ echo "       Check it at: https://console.cloud.google.com/iam-admin/quotas?proj
 
 # ------------------------------------------------------------------------------
 echo ""
-echo "[5/7] Hugging Face Token (required to download gated Gemma weights)"
+echo "[5/7] Hugging Face Token (recommended for pulling Gemma 4 weights)"
 if [[ -n "${HF_TOKEN:-}" ]]; then
   ok "HF_TOKEN is set (${HF_TOKEN:0:7}...)"
 else
-  warn "HF_TOKEN is not set. Gemma weights are license-gated on Hugging Face."
-  echo "         1. Visit https://huggingface.co/google/gemma-3-12b-it and accept the license."
+  warn "HF_TOKEN is not set. Setting a token avoids Hugging Face anonymous rate limits."
+  echo "         1. Visit https://huggingface.co/google/gemma-4-12B-it (or google/gemma-4-E4B-it)."
   echo "         2. Create a READ token at https://huggingface.co/settings/tokens"
   echo "         3. Run: export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxx"
-  echo "         (Alternatively, deploy Gemma from Vertex AI Model Garden, which needs no HF token.)"
+  echo "         (Alternatively, deploy Gemma 4 from Vertex AI Model Garden, which needs no HF token.)"
 fi
 
 # ------------------------------------------------------------------------------
