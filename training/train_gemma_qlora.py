@@ -75,7 +75,7 @@ def download_from_gcs_if_needed(gcs_or_local_path: str, local_target: str) -> st
     if not gcs_or_local_path.startswith("gs://"):
         return gcs_or_local_path
     fused = fuse_gcs_path(gcs_or_local_path)
-    if fused and os.path.exists(fused):
+    if fused and os.path.isdir("/gcs"):
         print(f"[*] Using Vertex AI Cloud Storage FUSE mount: {fused}")
         return fused
     os.makedirs(os.path.dirname(local_target), exist_ok=True)

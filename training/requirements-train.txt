@@ -1,15 +1,13 @@
-# GPU Fine-Tuning Container Dependencies (Vertex AI Custom Training / A100 / L4)
-# Floors aligned with Google's Gemma 4 QLoRA guide (transformers>=5.10.1, peft>=0.19.0)
-torch>=2.6.0
-transformers>=5.10.1
-accelerate>=1.1.0
-peft>=0.19.0
-trl>=1.14.0
-bitsandbytes>=0.48.0
-datasets>=3.0.0
-scipy>=1.13.0
-sentencepiece>=0.2.0
-protobuf>=4.25.0
-huggingface-hub>=0.25.0
-google-cloud-storage>=2.18.0
-google-cloud-aiplatform>=1.70.0
+# Pinned for reproducibility (Gemma 4 + QLoRA on Vertex AI).
+# Base image (pytorch/pytorch:2.13.0-cuda12.6-cudnn9-runtime) already provides torch 2.13 + CUDA 12.6.
+# Do NOT add an unbounded `torch` line here (PyPI's latest torch 2.14+ pulls CUDA 13 wheels).
+# Floors from Google's Gemma 4 QLoRA guide: transformers>=5.10.1, peft>=0.19.0.
+transformers==5.19.0
+trl==1.15.0
+peft==0.21.2
+accelerate==1.15.0
+datasets==5.1.0
+bitsandbytes==0.50.2
+tensorboard
+sentencepiece
+protobuf
