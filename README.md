@@ -297,24 +297,30 @@ If a bank has 5 different departments (e.g., Retail Lending, Corporate KYC, Trea
 
 > **Workstation Note**: This lab uses **100% pure Python Standard Library**. You can run it right now in **Google Cloud Shell** or on your MacBook terminal without installing Docker or `uv`.
 
-### Step 1.1: Clone / Open the Repository & Generate the Dataset
-Run the generator script to create `data/indian_fsi_sft_train.jsonl` (1,200 rows), `data/indian_fsi_sft_val.jsonl` (150 rows), and `data/indian_fsi_sft_test.jsonl` (150 rows):
+### Step 1.1: Clone the Repository & Generate the 5-Split Dataset
+Run `git clone` in Google Cloud Shell (or your local terminal) and run the generator script to create all 5 splits (`train`, `val`, `test`, `test_ood`, `challenge`) plus the cryptographic manifest (`data/data_card.json`):
 
 ```bash
+git clone https://github.com/cmanikandan/gemma-finetuning.git
+cd gemma-finetuning
+
 python3 data/generate_fsi_dataset.py --samples-per-domain 300 --output-dir data
 ```
 
 **Expected Output:**
 ```text
 [*] Generating Synthetic Indian FSI & Regulatory Dataset (300 samples x 5 domains)...
-[+] Successfully generated 1,500 Indian FSI instruction tuning examples!
-    - Train Split (80%):      1,200 examples -> data/indian_fsi_sft_train.jsonl
-    - Validation Split (10%): 150 examples -> data/indian_fsi_sft_val.jsonl
-    - Test Split (10%):       150 examples -> data/indian_fsi_sft_test.jsonl
+[+] Successfully generated 1,675 Indian FSI instruction tuning examples across 5 splits!
+    - Train Split (80% ID):       1,200 examples -> data/indian_fsi_sft_train.jsonl
+    - Validation Split (10% ID):  150 examples -> data/indian_fsi_sft_val.jsonl
+    - Test Split (10% ID):        150 examples -> data/indian_fsi_sft_test.jsonl
+    - Test OOD Split (Holdout):   150 examples -> data/indian_fsi_sft_test_ood.jsonl
+    - Challenge Split (RedTeam):  25 examples -> data/indian_fsi_sft_challenge.jsonl
+    - Data Provenance Card:       data/data_card.json
 ```
 
-### Step 1.2: Run the Exploratory Data Analysis (EDA) & Quality Audit
-Run `inspect_dataset.py` to verify schema integrity, zero missing values, zero split leakage, and sequence token length distribution:
+### Step 1.2: Run the Exploratory Data Analysis (EDA), Completion-Boundary & Zero-Leakage Audit
+Run `inspect_dataset.py` to verify schema integrity, zero missing values, completion-only loss mask boundaries (`<start_of_turn>model\n`), zero pairwise ID leakage across all 5 splits, and `data_card.json` SHA-256 digests:
 
 ```bash
 python3 data/inspect_dataset.py
@@ -322,42 +328,31 @@ python3 data/inspect_dataset.py
 
 **Expected Output:**
 ```text
-================================================================================
- INDIAN FSI & FINTECH SYNTHETIC DATASET — ML BEST PRACTICES AUDIT REPORT
-================================================================================
+========================================================================================
+ INDIAN FSI & FINTECH SYNTHETIC DATASET — ML BEST PRACTICES & PROVENANCE AUDIT REPORT
+========================================================================================
 
-[1] SCHEMA & MISSING/NULL VALUE VERIFICATION
---------------------------------------------------------------------------------
-  * Train (80%)        | Rows:  1200 | Null Audit: PASSED (0 Nulls/Missing)
-  * Validation (10%)   | Rows:   150 | Null Audit: PASSED (0 Nulls/Missing)
-  * Test (10%)         | Rows:   150 | Null Audit: PASSED (0 Nulls/Missing)
+[1] SCHEMA, NULL & COMPLETION-MASK BOUNDARY VERIFICATION
+----------------------------------------------------------------------------------------
+  * Train (80%)          | Rows:  1200 | Null Audit: PASSED (0 Nulls) | Mask Boundary: 1200/1200 Valid
+  * Validation (10%)     | Rows:   150 | Null Audit: PASSED (0 Nulls) | Mask Boundary: 150/150 Valid
+  * Test ID (10%)        | Rows:   150 | Null Audit: PASSED (0 Nulls) | Mask Boundary: 150/150 Valid
+  * Test OOD (Holdout)   | Rows:   150 | Null Audit: PASSED (0 Nulls) | Mask Boundary: 150/150 Valid
+  * Challenge (RedTeam)  | Rows:    25 | Null Audit: PASSED (0 Nulls) | Mask Boundary: 25/25 Valid
 
-[2] STRICT DATA LEAKAGE AUDIT (TRAIN vs. VAL vs. TEST)
---------------------------------------------------------------------------------
-  * Train ∩ Validation ID Overlap : 0 (Expected: 0)
-  * Train ∩ Test ID Overlap       : 0 (Expected: 0)
-  * Validation ∩ Test ID Overlap  : 0 (Expected: 0)
-  -> STATUS: PASSED — Strict featurization & split isolation verified.
+[2] STRICT DATA LEAKAGE AUDIT (ALL SPLITS PAIRWISE INTERSECTION)
+----------------------------------------------------------------------------------------
+  * Train (80%)          ∩ Validation (10%)     ID Overlap : 0 (Expected: 0)
+  * Train (80%)          ∩ Test ID (10%)        ID Overlap : 0 (Expected: 0)
+  * Train (80%)          ∩ Test OOD (Holdout)   ID Overlap : 0 (Expected: 0)
+  * Train (80%)          ∩ Challenge (RedTeam)  ID Overlap : 0 (Expected: 0)
+  -> STATUS: PASSED — Zero ID leakage across Train, Val, Test ID, Test OOD, and Challenge.
 
-[3] STRATIFIED INDIAN FSI DOMAIN DISTRIBUTION
---------------------------------------------------------------------------------
-  Domain Name                |    Train |      Val |     Test |    Total
-  ----------------------------------------------------------------------
-  DIGITAL_LENDING_KFS        |      240 |       30 |       30 |      300
-  ISO20022_PAYMENTS_OPS      |      240 |       30 |       30 |      300
-  NPCI_UPI_DISPUTE           |      240 |       30 |       30 |      300
-  RBI_KYC_AML                |      240 |       30 |       30 |      300
-  SEBI_CAPITAL_MARKETS       |      240 |       30 |       30 |      300
-
-[4] SEQUENCE LENGTH DISTRIBUTION (GEMMA CONTEXT WINDOW SIZING)
---------------------------------------------------------------------------------
-  * Train (80%)        | Mean Prompt:  90.2 tok | Mean Response: 293.1 tok | Mean Total: 383.3 tok | P95:  494 tok | Max:  506 tok
-  * Validation (10%)   | Mean Prompt:  90.6 tok | Mean Response: 292.6 tok | Mean Total: 383.2 tok | P95:  492 tok | Max:  501 tok
-  * Test (10%)         | Mean Prompt:  90.1 tok | Mean Response: 293.4 tok | Mean Total: 383.4 tok | P95:  494 tok | Max:  506 tok
-
-  -> ARCHITECTURAL RECOMMENDATION: Set `max_seq_length = 2048` in QLoRA SFTTrainer.
-     All examples fit comfortably within 2,048 tokens with zero truncation loss.
-================================================================================
+[5] CRYPTOGRAPHIC PROVENANCE MANIFEST (data/data_card.json)
+----------------------------------------------------------------------------------------
+  * System Prompt SHA-256 : d7922ab9678a16de9e90ee076f6f955b...
+  * Split File Checksums  : VERIFIED (All SHA-256 digests match)
+========================================================================================
 ```
 
 ---

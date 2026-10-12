@@ -14,20 +14,20 @@
 
 | # | Step | Command | Wall-Clock Time | Cost | GPU Needed? |
 | :-- | :--- | :--- | :--- | :--- | :--- |
-| 0 | Pre-flight validation | `./scripts/00_preflight_check.sh` | ~60 sec | $0.00 | No |
-| 1 | Generate synthetic FSI dataset | `python3 data/generate_fsi_dataset.py` | ~3 sec | $0.00 | No |
-| 2 | Audit dataset quality & leakage | `python3 data/inspect_dataset.py` | ~2 sec | $0.00 | No |
-| 3 | Provision sovereign infra (KMS/GCS/AR) | `./scripts/01_setup_sovereign_infra.sh` | ~3 min | ~$0.06/mo | No |
-| 4 | Run QLoRA fine-tuning on Vertex AI | `./scripts/02_submit_vertex_finetuning.sh` | ~32 min | **~$0.62** | Yes (1x L4) |
-| 5 | Evaluate with bootstrap CIs | `python3 evaluation/evaluate_fsi_model.py` | ~5 sec | $0.00 | No |
-| 6 | Deploy sovereign vLLM endpoint | `./scripts/03_deploy_sovereign_vllm.sh` | ~20 min | **~$0.85/hr** ⚠️ | Yes (1x L4) |
-| 7 | Smoke test the live endpoint | `./scripts/04_test_endpoint.sh` | ~30 sec | (included above) | — |
+| 0 | Pre-flight validation | `./scripts/00_preflight_check.sh` | ~60 sec | $0.00 (`₹0`) | No |
+| 1 | Generate 5-split FSI dataset + Data Card | `python3 data/generate_fsi_dataset.py` | ~3 sec | $0.00 (`₹0`) | No |
+| 2 | Audit dataset quality, masks & leakage | `python3 data/inspect_dataset.py` | ~2 sec | $0.00 (`₹0`) | No |
+| 3 | Provision sovereign infra (KMS/GCS/AR) | `./scripts/01_setup_sovereign_infra.sh` | ~3 min | ~$0.06/mo (`~₹5/mo`) | No |
+| 4 | Run Gemma 4 QLoRA fine-tuning on Vertex AI | `./scripts/02_submit_vertex_finetuning.sh` | ~22–30 min | **~$0.38–$0.62 (`~₹32–₹52`)** | Yes (1x L4) |
+| 5 | Run 3-way Rules/Base/Tuned & Passbook benchmarks | `python3 evaluation/evaluate_fsi_model.py && python3 evaluation/passbook_parser_benchmark.py` | ~5 sec | $0.00 (`₹0`) | No |
+| 6 | Deploy sovereign vLLM endpoint | `./scripts/03_deploy_sovereign_vllm.sh` | ~15–20 min | **~$0.20 (Cloud Run) / ~$1.15/hr (Vertex)** ⚠️ | Yes (1x L4) |
+| 7 | Smoke test & score the live endpoint | `./scripts/04_test_endpoint.sh` / `python3 evaluation/predict_endpoint.py` | ~30 sec | (included above) | — |
 | 8 | **Teardown (MANDATORY)** | `./scripts/99_cleanup_resources.sh --confirm` | ~5 min | Stops all billing | — |
 
-**Total hands-on time**: ~75 minutes. **Total cost if you clean up promptly**: **under $5**.
+**Total hands-on time**: ~60–75 minutes. **Total cost if you clean up promptly**: **~$0.80 – $1.50 USD (`~₹70 – ₹130 INR`)**.
 
 > [!CAUTION]
-> **Step 8 is not optional.** The endpoint created in Step 6 bills **~$0.85/hour whether or not you send it a single request** — about **$620/month**. If you only do one thing from this runbook, make it Step 8.
+> **Step 8 is not optional.** A dedicated Vertex AI endpoint created in Step 6 bills **~$1.15/hour whether or not you send it a single request**. If you only do one thing from this runbook, make it Step 8.
 
 ---
 
@@ -40,15 +40,11 @@ Everything in this bootcamp is designed to run in **Google Cloud Shell**, which 
 1. Go to <https://console.cloud.google.com> and click the **Activate Cloud Shell** icon (`>_`) in the top-right toolbar.
 2. Wait ~15 seconds for the ephemeral Debian VM to provision. It comes with `gcloud`, `python3`, and `git` pre-installed and pre-authenticated.
 
-### 0b. Get the Repository into Cloud Shell
+### 0b. Clone the Repository into Cloud Shell
 
 ```bash
-# If you pushed this repo to a git remote:
-git clone <your-repo-url> gemma-finetuning
+git clone https://github.com/cmanikandan/gemma-finetuning.git
 cd gemma-finetuning
-
-# OR: upload the folder via Cloud Shell's "⋮ → Upload" menu, then:
-cd ~/gemma-finetuning
 ```
 
 ### 0c. Set Your Core Environment Variables

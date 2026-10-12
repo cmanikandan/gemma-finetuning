@@ -20,9 +20,9 @@
 
 ### 1.1 A Model Is Just a Very Large Pile of Numbers
 
-When you download `google/gemma-3-12b-it`, you are downloading a folder of files totaling about **24 Gigabytes**. Inside those files is essentially one thing: **a gigantic list of decimal numbers**.
+When you download `google/gemma-4-12B-it`, you are downloading a folder of files totaling about **24 Gigabytes**. Inside those files is essentially one thing: **a gigantic list of decimal numbers**.
 
-- `gemma-3-12b-it` contains roughly **12,000,000,000 (12 billion) numbers**.
+- `gemma-4-12B-it` contains roughly **12,000,000,000 (12 billion) numbers** (and its compact sibling `gemma-4-E4B-it` has ~4 billion effective parameters).
 - Each of those numbers is called a **parameter** or a **weight**.
 - Each number is typically stored in **16 bits** (2 bytes) of memory. That's why: $12 \times 10^9 \text{ numbers} \times 2 \text{ bytes} = 24 \text{ GB}$.
 
@@ -74,8 +74,8 @@ You will see two flavors of every Gemma release:
 
 | Model Name | Meaning | Behavior |
 | :--- | :--- | :--- |
-| `google/gemma-3-12b` | **Base / Pre-trained** | Pure text autocomplete. Ask it a question and it may just generate 10 more similar questions. Not conversational. |
-| `google/gemma-3-12b-it` | **Instruction-Tuned** (`it`) | Google already fine-tuned it to follow instructions and behave like a helpful assistant. **Always start here.** |
+| `google/gemma-4-12B` | **Base / Pre-trained** | Pure text autocomplete. Ask it a question and it may just generate 10 more similar questions. Not conversational. |
+| `google/gemma-4-12B-it` | **Instruction-Tuned** (`it`) | Google already fine-tuned it to follow instructions and behave like a helpful assistant. **Always start here.** |
 
 We always fine-tune the **`-it`** variant, because we want to *add* Indian FSI expertise on top of existing conversational ability — not rebuild conversation from scratch.
 
