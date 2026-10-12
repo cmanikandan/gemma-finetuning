@@ -1,4 +1,4 @@
-# Principal Architect Bootcamp & Masterclass: Fine-Tuning Open-Weight Gemma for Indian FSI & Digital Sovereignty on Google Cloud
+# Fine-Tuning Open-Weight Gemma for Indian FSI & Digital Sovereignty on Google Cloud
 
 > **Target Audience**: Principal Architects, Cloud Architects, AI/ML Engineers, and FSI Field Engineering Teams  
 > **Technical Depth**: Level 300 / Level 400 (Deep Architectural Theory + End-to-End Production Implementation)  
