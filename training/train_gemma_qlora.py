@@ -136,28 +136,40 @@ def find_last_subsequence(seq: List[int], pattern: List[int]) -> Optional[int]:
 def make_completion_only_collator(tokenizer, max_length: int):
     """
     Tokenizes chats and trains ONLY on the assistant's regulatory response.
-    Everything up to and including `<start_of_turn>model\\n` (Gemma 2/3) or `<|turn>model\\n` (Gemma 4),
+    Everything up to and including `<|turn>model\\n` (Gemma 4) or `<start_of_turn>model\\n` (Gemma 2/3),
     plus right-padding positions (`attention_mask == 0`), receives label `-100`.
     """
     markers = []
-    for header in ("<start_of_turn>model\n", "<|turn>model\n"):
+    for header in ("<|turn>model\n", "<start_of_turn>model\n"):
         encoded_hdr = tokenizer.encode(header, add_special_tokens=False)
         if encoded_hdr:
             markers.append(encoded_hdr)
+    fallback_gemma4 = [tokenizer.convert_tokens_to_ids(t) for t in ("<|turn>", "model", "\n")]
+    if all(isinstance(x, int) and x >= 0 for x in fallback_gemma4):
+        markers.append(fallback_gemma4)
 
     stats = {"batches": 0, "dropped": 0, "truncated": 0}
 
     def collate(examples):
         texts = []
         for ex in examples:
-            if "gemma_text" in ex and ex["gemma_text"]:
+            if "messages" in ex and ex["messages"]:
+                try:
+                    texts.append(
+                        tokenizer.apply_chat_template(
+                            ex["messages"], tokenize=False, enable_thinking=False
+                        ).strip()
+                    )
+                except TypeError:
+                    texts.append(
+                        tokenizer.apply_chat_template(
+                            ex["messages"], tokenize=False
+                        ).strip()
+                    )
+            elif "gemma_text" in ex and ex["gemma_text"]:
                 texts.append(ex["gemma_text"].strip())
             else:
-                texts.append(
-                    tokenizer.apply_chat_template(
-                        ex["messages"], tokenize=False, enable_thinking=False
-                    ).strip()
-                )
+                raise ValueError("Dataset example must contain 'messages' or 'gemma_text'")
         tokenizer.padding_side = "right"
         batch = tokenizer(
             texts,
@@ -287,9 +299,10 @@ def parse_args():
 def main():
     args = parse_args()
 
+    import inspect
     import torch
     from datasets import load_dataset
-    from peft import LoraConfig, PeftModel, prepare_model_for_kbit_training
+    from peft import LoraConfig, PeftModel
     from transformers import (
         AutoModelForCausalLM,
         AutoTokenizer,
@@ -344,41 +357,43 @@ def main():
         tokenizer.pad_token = tokenizer.eos_token
     tokenizer.padding_side = "right"
 
-    print("[*] Configuring 4-bit NF4 BitsAndBytes Quantization (Compute Dtype: bfloat16)...")
+    print("[*] Configuring 4-bit NF4 BitsAndBytes Quantization (Compute & Storage Dtype: bfloat16)...")
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
         bnb_4bit_compute_dtype=torch.bfloat16,
+        bnb_4bit_quant_storage=torch.bfloat16,
         bnb_4bit_use_double_quant=True,
     )
 
-    print(f"[*] Loading Base Model `{model_source}` onto GPU...")
-    is_multimodal = False
-    try:
-        from transformers import AutoModelForMultimodalLM
-        if any(tag in args.model_id.lower() for tag in ("gemma-4-12b", "gemma-4-e4b")):
-            model = AutoModelForMultimodalLM.from_pretrained(
-                model_source,
-                quantization_config=bnb_config,
-                device_map="auto",
-                torch_dtype=torch.bfloat16,
-                attn_implementation="sdpa",
-                token=hf_token,
-            )
-            is_multimodal = True
-        else:
-            raise ValueError("Use CausalLM loader")
-    except Exception:
-        model = AutoModelForCausalLM.from_pretrained(
-            model_source,
-            quantization_config=bnb_config,
-            device_map="auto",
+    def load_base_model(path: str, quant_cfg=None, device_map_override=None):
+        dev_map = device_map_override if device_map_override is not None else ({"": 0} if torch.cuda.is_available() else "auto")
+        common_kwargs = dict(
+            device_map=dev_map,
             torch_dtype=torch.bfloat16,
-            attn_implementation="eager",
             token=hf_token,
         )
+        if quant_cfg is not None:
+            common_kwargs["quantization_config"] = quant_cfg
+        try:
+            from transformers import AutoModelForMultimodalLM
+            m = AutoModelForMultimodalLM.from_pretrained(
+                path,
+                attn_implementation="sdpa",
+                **common_kwargs,
+            )
+            return m, True
+        except Exception:
+            m = AutoModelForCausalLM.from_pretrained(
+                path,
+                attn_implementation="eager",
+                **common_kwargs,
+            )
+            return m, False
+
+    print(f"[*] Loading Base Model `{model_source}` onto GPU...")
+    model, is_multimodal = load_base_model(model_source, quant_cfg=bnb_config)
     model.config.use_cache = False
-    model = prepare_model_for_kbit_training(model)
 
     target_modules = get_lora_target_modules(args.model_id, is_multimodal=is_multimodal)
     peft_config = LoraConfig(
@@ -405,9 +420,9 @@ def main():
         supervised_preview=collator.preview(dataset["train"][0])[:240],
     )
 
-    sft_config = SFTConfig(
+    sft_sig_params = inspect.signature(SFTConfig.__init__).parameters
+    sft_kwargs = dict(
         output_dir=local_output_dir,
-        max_seq_length=args.max_seq_length,
         num_train_epochs=args.epochs,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
@@ -415,11 +430,11 @@ def main():
         learning_rate=args.learning_rate,
         weight_decay=0.01,
         lr_scheduler_type="cosine",
-        warmup_ratio=0.05,
         bf16=True,
         logging_steps=10,
         eval_strategy="steps",
         eval_steps=50,
+        prediction_loss_only=True,
         save_strategy="steps",
         save_steps=100,
         save_total_limit=2,
@@ -430,6 +445,17 @@ def main():
         remove_unused_columns=False,
         report_to="none",
     )
+    if "max_length" in sft_sig_params:
+        sft_kwargs["max_length"] = args.max_seq_length
+    elif "max_seq_length" in sft_sig_params:
+        sft_kwargs["max_seq_length"] = args.max_seq_length
+
+    if "warmup_steps" in sft_sig_params:
+        sft_kwargs["warmup_steps"] = 0.05
+    elif "warmup_ratio" in sft_sig_params:
+        sft_kwargs["warmup_ratio"] = 0.05
+
+    sft_config = SFTConfig(**sft_kwargs)
 
     trainer = SFTTrainer(
         model=model,
@@ -450,7 +476,7 @@ def main():
 
     adapter_save_path = os.path.join(local_output_dir, "lora_adapter")
     print(f"[+] Saving LoRA Adapter weights to {adapter_save_path}...")
-    trainer.model.save_pretrained(adapter_save_path)
+    trainer.save_model(adapter_save_path)
     tokenizer.save_pretrained(adapter_save_path)
     log_json("training complete", minutes=round(train_secs / 60.0, 2), collator_stats=collator.stats)
 
@@ -461,12 +487,9 @@ def main():
         del trainer
         torch.cuda.empty_cache()
 
-        base_model_bf16 = AutoModelForCausalLM.from_pretrained(
-            model_source,
-            torch_dtype=torch.bfloat16,
-            device_map="auto",
-            token=hf_token,
-        )
+        # Use host RAM (48GB on g2-standard-12) for >=12B BF16 merge so 24GB L4 VRAM never OOMs
+        merge_device_map = "cpu" if any(k in args.model_id.lower() for k in ("12b", "26b", "27b", "31b")) else None
+        base_model_bf16, _ = load_base_model(model_source, quant_cfg=None, device_map_override=merge_device_map)
         merged_model = PeftModel.from_pretrained(base_model_bf16, adapter_save_path)
         merged_model = merged_model.merge_and_unload()
         merged_model.save_pretrained(merged_save_path, safe_serialization=True, max_shard_size="4GB")

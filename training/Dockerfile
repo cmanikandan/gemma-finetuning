@@ -1,6 +1,6 @@
 # Sovereign Gemma QLoRA Fine-Tuning Container
 # Built remotely in Google Cloud Build (asia-south1) — NO local Docker daemon required!
-FROM pytorch/pytorch:2.4.0-cuda12.1-cudnn9-devel
+FROM pytorch/pytorch:2.13.0-cuda12.6-cudnn9-runtime
 
 WORKDIR /workspace
 

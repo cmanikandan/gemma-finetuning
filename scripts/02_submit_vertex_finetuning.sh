@@ -73,6 +73,9 @@ echo " * In-Region Mirror: ${BASE_MIRROR}"
 echo " * Output Artifacts: ${OUTPUT_GCS_URI}"
 echo "================================================================================"
 
+echo "[*] Syncing latest training/train_gemma_qlora.py to gs://${BUCKET_NAME}/scripts/train_gemma_qlora.py..."
+gcloud storage cp ./training/train_gemma_qlora.py "gs://${BUCKET_NAME}/scripts/train_gemma_qlora.py" --project="${PROJECT_ID}" >/dev/null
+
 if [[ "${BUILD_MODE}" == "cloudbuild" ]]; then
   echo "[*] Mode: Cloud Build — Building custom container remotely in Google Cloud (${REGION})..."
   export IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/fsi-gemma-repo/gemma-qlora-trainer:v1"
@@ -81,7 +84,7 @@ if [[ "${BUILD_MODE}" == "cloudbuild" ]]; then
     --tag="${IMAGE_URI}" \
     --project="${PROJECT_ID}"
 
-  # Create Vertex AI Custom Job spec with custom image
+  # Create Vertex AI CustomJobSpec YAML (CustomJobSpec accepts workerPoolSpecs & baseOutputDirectory)
   cat <<EOF > /tmp/vertex_custom_job_spec.yaml
 workerPoolSpecs:
   - machineSpec:
@@ -109,13 +112,13 @@ workerPoolSpecs:
         - "--batch-size=2"
         - "--grad-accum=8"
         - "--merge-weights"
-encryptionSpec:
-  kmsKeyName: ${KMS_KEY_URI}
+baseOutputDirectory:
+  outputUriPrefix: ${OUTPUT_GCS_URI}
 EOF
 
 else
   echo "[*] Mode: Zero-Build Pre-Built PyTorch GPU Container (Instant Launch)..."
-  # Uses Vertex AI Official PyTorch 2.4 CUDA 12.1 Container
+  # Uses Vertex AI Official PyTorch GPU Container and upgrades to PyTorch >=2.6 + Transformers >=5.10.1 for Gemma 4
   export PREBUILT_IMAGE="us-docker.pkg.dev/vertex-ai/training/pytorch-gpu.2-4.py310:latest"
 
   cat <<EOF > /tmp/vertex_custom_job_spec.yaml
@@ -139,8 +142,9 @@ workerPoolSpecs:
       args:
         - |
           set -e
-          echo "[*] Installing / upgrading QLoRA & HuggingFace TRL dependencies inside ephemeral GPU VM..."
-          pip install --no-cache-dir --upgrade "transformers>=4.46.0" "accelerate>=1.0.0" "peft>=0.13.0" "trl>=0.11.4" "bitsandbytes>=0.44.0" "datasets>=3.0.0" sentencepiece protobuf
+          echo "[*] Installing / upgrading Gemma 4 QLoRA & HuggingFace TRL stack inside ephemeral GPU VM..."
+          pip install --no-cache-dir --upgrade "torch>=2.6.0" torchvision torchaudio "transformers>=5.10.1" "accelerate>=1.1.0" "peft>=0.19.0" "trl>=1.14.0" "bitsandbytes>=0.48.0" "datasets>=3.0.0" sentencepiece protobuf
+          python3 -c "import torch, transformers, trl, peft, bitsandbytes; print('[+] Verified Gemma 4 runtime stack:', torch.__version__, transformers.__version__, trl.__version__, peft.__version__)"
           echo "[*] Downloading training script from Sovereign GCS Bucket..."
           gcloud storage cp gs://${BUCKET_NAME}/scripts/train_gemma_qlora.py /tmp/train_gemma_qlora.py
           echo "[*] Launching 4-Bit NF4 QLoRA Fine-Tuning on Gemma 4..."
@@ -156,34 +160,28 @@ workerPoolSpecs:
             --batch-size=2 \
             --grad-accum=8 \
             --merge-weights
-encryptionSpec:
-  kmsKeyName: ${KMS_KEY_URI}
+baseOutputDirectory:
+  outputUriPrefix: ${OUTPUT_GCS_URI}
 EOF
 fi
 
 echo "[*] Submitting Custom Training Job to Vertex AI (${REGION})..."
-if ! gcloud ai custom-jobs create \
+gcloud ai custom-jobs create \
   --region="${REGION}" \
   --display-name="${JOB_NAME}" \
   --config="/tmp/vertex_custom_job_spec.yaml" \
-  --project="${PROJECT_ID}" 2>/tmp/vertex_submit_err.log; then
-  cat /tmp/vertex_submit_err.log
-  if grep -qiE "kms|cryptoKey|serviceAccount|permission" /tmp/vertex_submit_err.log; then
-    echo "[*] New project Vertex AI Custom Code Service Agent is still propagating for boot-disk CMEK."
-    echo "    Retrying submission using CMEK-encrypted GCS bucket (${OUTPUT_GCS_URI}) with standard boot disk encryption..."
-    sed -i.bak '/^encryptionSpec:/d; /kmsKeyName:/d' /tmp/vertex_custom_job_spec.yaml
-    gcloud ai custom-jobs create \
-      --region="${REGION}" \
-      --display-name="${JOB_NAME}" \
-      --config="/tmp/vertex_custom_job_spec.yaml" \
-      --project="${PROJECT_ID}"
-  else
-    exit 1
-  fi
-fi
+  --project="${PROJECT_ID}"
+
+JOB_RESOURCE=$(gcloud ai custom-jobs list \
+  --region="${REGION}" \
+  --project="${PROJECT_ID}" \
+  --filter="displayName=${JOB_NAME}" \
+  --format="value(name)" | head -n 1)
 
 echo "================================================================================"
 echo " [+] JOB SUBMITTED SUCCESSFULLY!"
-echo "     Monitor live GPU logs in Cloud Shell or Console:"
-echo "     gcloud ai custom-jobs list --region=${REGION} --project=${PROJECT_ID}"
+echo "     * Job Resource : ${JOB_RESOURCE:-${JOB_NAME}}"
+echo "     * Output URI   : ${OUTPUT_GCS_URI} (CMEK Encrypted in ${REGION})"
+echo "     * Stream Logs  : gcloud ai custom-jobs stream-logs ${JOB_RESOURCE:-<JOB_ID>} --region=${REGION}"
+echo "     * List Jobs    : gcloud ai custom-jobs list --region=${REGION} --project=${PROJECT_ID}"
 echo "================================================================================"

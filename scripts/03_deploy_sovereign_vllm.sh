@@ -22,7 +22,7 @@ export DEPLOY_TARGET="${DEPLOY_TARGET:-vertex-endpoint}" # "vertex-endpoint" or 
 # ------------------------------------------------------------------------------
 if [[ -z "${MODEL_ARTIFACT_GCS_URI:-}" ]]; then
   echo "[*] Auto-discovering the most recent fine-tuned model in gs://${BUCKET_NAME}/models/ ..."
-  LATEST_RUN=$(gcloud storage ls "gs://${BUCKET_NAME}/models/" --project="${PROJECT_ID}" 2>/dev/null | sort | tail -n 1)
+  LATEST_RUN=$(gcloud storage ls "gs://${BUCKET_NAME}/models/" --project="${PROJECT_ID}" 2>/dev/null | grep -E "sft-" | sort | tail -n 1)
   if [[ -z "${LATEST_RUN}" ]]; then
     echo "[!] ERROR: No fine-tuned models found in gs://${BUCKET_NAME}/models/"
     echo "    Run ./scripts/02_submit_vertex_finetuning.sh first and wait for it to finish, OR"
@@ -41,11 +41,11 @@ if ! gcloud storage ls "${MODEL_ARTIFACT_GCS_URI}/config.json" --project="${PROJ
   exit 1
 fi
 
-export MODEL_DISPLAY_NAME="${MODEL_DISPLAY_NAME:-gemma-indian-fsi-sovereign}"
+export MODEL_DISPLAY_NAME="${MODEL_DISPLAY_NAME:-gemma4-indian-fsi-sovereign}"
 export ENDPOINT_DISPLAY_NAME="${ENDPOINT_DISPLAY_NAME:-fsi-sovereign-vllm-endpoint}"
 
-# Official Google Cloud Vertex AI vLLM GPU Serving Container
-export VLLM_IMAGE_URI="${VLLM_IMAGE_URI:-us-docker.pkg.dev/vertex-ai/vertex-vision-model-garden-dockers/pytorch-vllm-serve:20241022_0916_RC00}"
+# Official Google Cloud Vertex AI vLLM GPU Serving Container for Gemma 4
+export VLLM_IMAGE_URI="${VLLM_IMAGE_URI:-us-docker.pkg.dev/vertex-ai/vertex-vision-model-garden-dockers/pytorch-vllm-serve:gemma4}"
 
 echo "================================================================================"
 echo " DEPLOYING SOVEREIGN FSI GEMMA MODEL VIA vLLM IN ${REGION}"
