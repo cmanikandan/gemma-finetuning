@@ -62,11 +62,15 @@ else
   export MIRROR_TO_ARG="${BASE_MIRROR}"
 fi
 
-if [[ -z "${HF_TOKEN:-}" ]]; then
-  echo "[!] WARNING: HF_TOKEN environment variable is not set."
-  echo "    If pulling Gemma weights from HuggingFace Hub on the first run, export your token:"
-  echo "    export HF_TOKEN=hf_xxxxxxxxxxxxxxxxxxxxxxxx"
-  echo "    (Subsequent runs load automatically from your Mumbai GCS mirror: ${BASE_MIRROR})"
+if [[ -n "${HF_TOKEN:-}" ]]; then
+  ENV_YAML="      env:
+        - name: HF_TOKEN
+          value: \"${HF_TOKEN}\""
+else
+  echo "[*] Note: HF_TOKEN is not set (not required for ungated Apache 2.0 Gemma 4 models or Mumbai GCS mirror)."
+  ENV_YAML="      env:
+        - name: PYTHONUNBUFFERED
+          value: \"1\""
 fi
 
 echo "================================================================================"
@@ -106,12 +110,17 @@ done
 
 if [[ "${BUILD_MODE}" == "cloudbuild" ]]; then
   export IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/fsi-gemma-repo/gemma-qlora-trainer:v1"
-  echo "[*] Mode: Cloud Build — Building Gemma 4 container (pytorch:2.13.0-cuda12.6 + transformers==5.19.0) remotely in ${REGION}..."
-  gcloud builds submit ./training \
-    --region="${REGION}" \
-    --tag="${IMAGE_URI}" \
-    --timeout=3600 \
-    --project="${PROJECT_ID}"
+  if [[ "${FORCE_REBUILD:-0}" != "1" ]] && gcloud artifacts docker images describe "${IMAGE_URI}" --project="${PROJECT_ID}" &>/dev/null; then
+    echo "[*] Found pre-built Gemma 4 container in Artifact Registry: ${IMAGE_URI}"
+    echo "    Skipping Cloud Build for instant launch! (Export FORCE_REBUILD=1 to force a container rebuild)"
+  else
+    echo "[*] Mode: Cloud Build — Building Gemma 4 container (pytorch:2.13.0-cuda12.6 + transformers==5.19.0) remotely in ${REGION}..."
+    gcloud builds submit ./training \
+      --region="${REGION}" \
+      --tag="${IMAGE_URI}" \
+      --timeout=3600 \
+      --project="${PROJECT_ID}"
+  fi
 
   # Create Vertex AI CustomJobSpec YAML (CustomJobSpec accepts workerPoolSpecs & baseOutputDirectory)
   cat <<EOF > /tmp/vertex_custom_job_spec.yaml
@@ -126,9 +135,10 @@ workerPoolSpecs:
       bootDiskSizeGb: 200
     containerSpec:
       imageUri: ${IMAGE_URI}
-      env:
-        - name: HF_TOKEN
-          value: "${HF_TOKEN:-}"
+${ENV_YAML}
+      command:
+        - python3
+        - "/gcs/${BUCKET_NAME}/scripts/train_gemma_qlora.py"
       args:
         - "--model-id=${EFFECTIVE_MODEL_ARG}"
         - "--mirror-to=${MIRROR_TO_ARG}"
@@ -161,9 +171,7 @@ workerPoolSpecs:
       bootDiskSizeGb: 200
     containerSpec:
       imageUri: ${PREBUILT_IMAGE}
-      env:
-        - name: HF_TOKEN
-          value: "${HF_TOKEN:-}"
+${ENV_YAML}
       command:
         - bash
         - -c

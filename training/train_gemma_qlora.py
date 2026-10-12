@@ -334,7 +334,7 @@ def main():
     local_output_dir = "/tmp/output/gemma-fsi-qlora" if is_gcs_output else args.output_dir
     os.makedirs(local_output_dir, exist_ok=True)
 
-    hf_token = os.environ.get("HF_TOKEN")
+    hf_token = (os.environ.get("HF_TOKEN") or "").strip() or None
 
     # Resolve base model from GCS mirror or Hugging Face Hub
     model_source = fuse_gcs_path(args.model_id) or args.model_id
