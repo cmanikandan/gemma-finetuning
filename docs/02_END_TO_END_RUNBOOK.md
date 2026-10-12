@@ -265,7 +265,7 @@ This is the actual training step. **No Docker runs on your machine.**
 
 ```bash
 export BASE_MODEL_ID="google/gemma-4-12B-it"   # default; see alternatives below
-export BUILD_MODE="prebuilt"                   # default; zero container build
+export BUILD_MODE="cloudbuild"                 # default for Gemma 4; zero local Docker
 
 ./scripts/02_submit_vertex_finetuning.sh
 ```
@@ -282,8 +282,8 @@ export BUILD_MODE="prebuilt"                   # default; zero container build
 
 ### The Two Build Modes
 
-- **`BUILD_MODE=prebuilt` (default, recommended)** — Uses Google's official `pytorch-gpu.2-4.py310` Deep Learning Container and `pip install`s TRL/PEFT/BitsAndBytes inside the ephemeral GPU VM at job start. **Nothing is built anywhere.** Adds ~4 minutes of startup.
-- **`BUILD_MODE=cloudbuild`** — Builds `training/Dockerfile` **remotely on Google Cloud Build** (never on your laptop) and pushes to your CMEK Artifact Registry. Use this for air-gapped enterprise deployments where runtime `pip install` from PyPI is prohibited. Adds ~8 minutes on the first run, saves 4 minutes on every subsequent run.
+- **`BUILD_MODE=cloudbuild` (default for Gemma 4, recommended)** — Builds `training/Dockerfile` (`pytorch:2.13.0-cuda12.6` + `transformers==5.19.0`) **remotely on Google Cloud Build** (never on your laptop) and caches it in your Artifact Registry (`gemma-qlora-trainer:v1`). Subsequent runs automatically skip the build and launch immediately.
+- **`BUILD_MODE=prebuilt` (legacy Gemma 2 / 3 only)** — Uses Google's `pytorch-gpu.2-4.py310` Deep Learning Container and `pip install`s packages at container startup.
 
 **Expected output:**
 
