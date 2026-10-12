@@ -288,7 +288,8 @@ def parse_args():
     parser.add_argument("--lora-alpha", type=int, default=32, help="LoRA alpha scaling factor (typically 2 * lora_r)")
     parser.add_argument("--lora-dropout", type=float, default=0.05, help="LoRA dropout probability")
     parser.add_argument("--max-seq-length", type=int, default=2048, help="Maximum token sequence length (up to 128K on Gemma 3/4)")
-    parser.add_argument("--epochs", type=int, default=3, help="Number of training epochs")
+    parser.add_argument("--epochs", type=float, default=1.0, help="Number of training epochs (default: 1.0 over 1,200 examples)")
+    parser.add_argument("--max-steps", type=int, default=-1, help="Optional max optimizer steps override (-1 uses epochs)")
     parser.add_argument("--batch-size", type=int, default=2, help="Per-device training batch size")
     parser.add_argument("--grad-accum", type=int, default=8, help="Gradient accumulation steps (effective batch size = batch * accum)")
     parser.add_argument("--learning-rate", type=float, default=2e-4, help="Peak learning rate for AdamW paged optimizer")
@@ -299,6 +300,7 @@ def parse_args():
 def main():
     args = parse_args()
 
+    import gc
     import inspect
     import torch
     from datasets import load_dataset
@@ -316,11 +318,16 @@ def main():
 
         def on_log(self, cb_args, state, control, logs=None, **kwargs):
             if logs:
+                clean_logs = {
+                    k: (round(v, 5) if isinstance(v, float) else v)
+                    for k, v in logs.items()
+                    if k not in ("step", "epoch", "msg", "t")
+                }
                 log_json(
                     "train",
                     step=state.global_step,
                     epoch=round(state.epoch or 0.0, 3),
-                    **{k: round(v, 5) if isinstance(v, float) else v for k, v in logs.items()},
+                    **clean_logs,
                 )
 
     local_train = download_from_gcs_if_needed(args.train_dataset, "/tmp/data/train.jsonl")
@@ -370,7 +377,7 @@ def main():
         dev_map = device_map_override if device_map_override is not None else ({"": 0} if torch.cuda.is_available() else "auto")
         common_kwargs = dict(
             device_map=dev_map,
-            torch_dtype=torch.bfloat16,
+            dtype=torch.bfloat16,
             token=hf_token,
         )
         if quant_cfg is not None:
@@ -422,8 +429,9 @@ def main():
 
     sft_sig_params = inspect.signature(SFTConfig.__init__).parameters
     sft_kwargs = dict(
-        output_dir=local_output_dir,
+        output_dir=os.path.join(local_output_dir, "checkpoints"),
         num_train_epochs=args.epochs,
+        max_steps=args.max_steps,
         per_device_train_batch_size=args.batch_size,
         per_device_eval_batch_size=args.batch_size,
         gradient_accumulation_steps=args.grad_accum,
@@ -435,9 +443,7 @@ def main():
         eval_strategy="steps",
         eval_steps=50,
         prediction_loss_only=True,
-        save_strategy="steps",
-        save_steps=100,
-        save_total_limit=2,
+        save_strategy="no",
         optim="paged_adamw_8bit",
         gradient_checkpointing=True,
         gradient_checkpointing_kwargs={"use_reentrant": False},
@@ -478,13 +484,15 @@ def main():
     print(f"[+] Saving LoRA Adapter weights to {adapter_save_path}...")
     trainer.save_model(adapter_save_path)
     tokenizer.save_pretrained(adapter_save_path)
+    shutil.rmtree(os.path.join(local_output_dir, "checkpoints"), ignore_errors=True)
     log_json("training complete", minutes=round(train_secs / 60.0, 2), collator_stats=collator.stats)
 
     if args.merge_weights:
         merged_save_path = os.path.join(local_output_dir, "merged_model_bf16")
         print(f"[*] Merging LoRA Adapter into Base Model (BF16) -> {merged_save_path}...")
-        del model
         del trainer
+        del model
+        gc.collect()
         torch.cuda.empty_cache()
 
         # Use host RAM (48GB on g2-standard-12) for >=12B BF16 merge so 24GB L4 VRAM never OOMs

@@ -39,6 +39,8 @@ export ACCELERATOR_COUNT="${ACCELERATOR_COUNT:-1}"
 # - Gemma 4 Dense Flagship (31B):        google/gemma-4-31B-it     (Use g2-standard-24 [2x L4] or a2-highgpu-1g [1x A100])
 # - Legacy Gemma 3 / 2 (Supported):      google/gemma-3-12b-it, google/gemma-2-9b-it
 export BASE_MODEL_ID="${BASE_MODEL_ID:-google/gemma-4-12B-it}"
+export EPOCHS="${EPOCHS:-1}"
+export MAX_STEPS="${MAX_STEPS:--1}"
 export BASE_MIRROR="gs://${BUCKET_NAME}/models/base-mirror/${BASE_MODEL_ID//\//_}"
 export JOB_NAME="gemma4-fsi-qlora-sft-$(date +%Y%m%d-%H%M%S)"
 export OUTPUT_GCS_URI="gs://${BUCKET_NAME}/models/${JOB_NAME}"
@@ -147,7 +149,8 @@ ${ENV_YAML}
         - "--output-dir=${OUTPUT_GCS_URI}"
         - "--lora-r=16"
         - "--lora-alpha=32"
-        - "--epochs=3"
+        - "--epochs=${EPOCHS}"
+        - "--max-steps=${MAX_STEPS}"
         - "--batch-size=2"
         - "--grad-accum=8"
         - "--merge-weights"
@@ -194,7 +197,8 @@ ${ENV_YAML}
             --output-dir="${OUTPUT_GCS_URI}" \
             --lora-r=16 \
             --lora-alpha=32 \
-            --epochs=3 \
+            --epochs=${EPOCHS} \
+            --max-steps=${MAX_STEPS} \
             --batch-size=2 \
             --grad-accum=8 \
             --merge-weights
