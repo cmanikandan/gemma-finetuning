@@ -21,15 +21,20 @@ export DEPLOY_TARGET="${DEPLOY_TARGET:-vertex-endpoint}" # "vertex-endpoint" or 
 # Override by exporting MODEL_ARTIFACT_GCS_URI yourself.
 # ------------------------------------------------------------------------------
 if [[ -z "${MODEL_ARTIFACT_GCS_URI:-}" ]]; then
-  echo "[*] Auto-discovering the most recent fine-tuned model in gs://${BUCKET_NAME}/models/ ..."
-  LATEST_RUN=$(gcloud storage ls "gs://${BUCKET_NAME}/models/" --project="${PROJECT_ID}" 2>/dev/null | grep -E "sft-" | sort | tail -n 1)
-  if [[ -z "${LATEST_RUN}" ]]; then
-    echo "[!] ERROR: No fine-tuned models found in gs://${BUCKET_NAME}/models/"
-    echo "    Run ./scripts/02_submit_vertex_finetuning.sh first and wait for it to finish, OR"
-    echo "    export MODEL_ARTIFACT_GCS_URI=gs://your-bucket/path/to/merged_model_bf16"
-    exit 1
+  echo "[*] Auto-discovering the most recent completed fine-tuned model in gs://${BUCKET_NAME}/models/ ..."
+  LATEST_CONFIG=$(gcloud storage ls "gs://${BUCKET_NAME}/models/*/merged_model_bf16/config.json" --project="${PROJECT_ID}" 2>/dev/null | sort | tail -n 1 || true)
+  if [[ -n "${LATEST_CONFIG}" ]]; then
+    export MODEL_ARTIFACT_GCS_URI="${LATEST_CONFIG%/config.json}"
+  else
+    LATEST_RUN=$(gcloud storage ls "gs://${BUCKET_NAME}/models/" --project="${PROJECT_ID}" 2>/dev/null | grep -E "sft-" | sort | tail -n 1 || true)
+    if [[ -z "${LATEST_RUN}" ]]; then
+      echo "[!] ERROR: No fine-tuned models found in gs://${BUCKET_NAME}/models/"
+      echo "    Run ./scripts/02_submit_vertex_finetuning.sh first and wait for it to finish, OR"
+      echo "    export MODEL_ARTIFACT_GCS_URI=gs://your-bucket/path/to/merged_model_bf16"
+      exit 1
+    fi
+    export MODEL_ARTIFACT_GCS_URI="${LATEST_RUN%/}/merged_model_bf16"
   fi
-  export MODEL_ARTIFACT_GCS_URI="${LATEST_RUN%/}/merged_model_bf16"
   echo "    -> Found: ${MODEL_ARTIFACT_GCS_URI}"
 fi
 
@@ -68,6 +73,8 @@ if [[ "${DEPLOY_TARGET}" == "cloud-run-gpu" ]]; then
     --max-num-seqs=16
     --gpu-memory-utilization=0.90
     --dtype=bfloat16
+    --quantization=bitsandbytes
+    --load-format=bitsandbytes
     --enable-prefix-caching
     '--limit-mm-per-prompt={"image":0,"audio":0}'
     --generation-config=auto
@@ -111,29 +118,66 @@ elif [[ "${DEPLOY_TARGET}" == "model-garden" ]]; then
     --project="${PROJECT_ID}"
   echo "[+] Vertex AI Model Garden Custom Weights Deployment Initiated!"
 else
+  # Ensure the Vertex AI Service Agent can read the merged model from the CMEK-encrypted bucket
+  PROJECT_NUMBER=$(gcloud projects describe "${PROJECT_ID}" --format="value(projectNumber)")
+  VERTEX_SA="service-${PROJECT_NUMBER}@gcp-sa-aiplatform.iam.gserviceaccount.com"
+  COMPUTE_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
+  for sa in "${VERTEX_SA}" "${COMPUTE_SA}"; do
+    gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
+      --member="serviceAccount:${sa}" \
+      --role="roles/storage.objectViewer" \
+      --condition=None --quiet >/dev/null 2>&1 || true
+    gcloud kms keys add-iam-policy-binding "gemma-cmek-key" \
+      --keyring="fsi-sovereign-kr" \
+      --location="${REGION}" \
+      --member="serviceAccount:${sa}" \
+      --role="roles/cloudkms.cryptoKeyEncrypterDecrypter" \
+      --project="${PROJECT_ID}" >/dev/null 2>&1 || true
+  done
+
   echo "[1/3] Uploading Fine-Tuned Gemma Model to Vertex AI Model Registry (${REGION})..."
+  # Note: On a single 24GB NVIDIA L4 (g2-standard-12), 12B BF16 weights (~24GB) use dynamic 4-bit bitsandbytes
+  # quantization in vLLM so weights take ~8GB VRAM and leave ~13GB VRAM for the PagedAttention KV cache.
+  VLLM_CONTAINER_ARGS="--model=\$(AIP_STORAGE_URI),--dtype=bfloat16,--quantization=bitsandbytes,--load-format=bitsandbytes,--max-model-len=4096,--max-num-seqs=16,--gpu-memory-utilization=0.90,--enable-prefix-caching"
+
   MODEL_RESOURCE=$(gcloud ai models upload \
     --region="${REGION}" \
     --display-name="${MODEL_DISPLAY_NAME}" \
     --container-image-uri="${VLLM_IMAGE_URI}" \
     --artifact-uri="${MODEL_ARTIFACT_GCS_URI}" \
-    --container-args="--model=\$(AIP_STORAGE_URI),--dtype=bfloat16,--max-model-len=4096,--gpu-memory-utilization=0.90,--enable-prefix-caching" \
+    --container-args="${VLLM_CONTAINER_ARGS}" \
     --container-ports=8000 \
     --container-predict-route="/v1/completions" \
     --container-health-route="/health" \
     --project="${PROJECT_ID}" \
-    --format="value(model)")
+    --format="value(model)" 2>/dev/null || true)
 
+  if [[ -z "${MODEL_RESOURCE}" ]]; then
+    MODEL_RESOURCE=$(gcloud ai models list \
+      --region="${REGION}" \
+      --project="${PROJECT_ID}" \
+      --filter="displayName=${MODEL_DISPLAY_NAME}" \
+      --sort-by="~createTime" \
+      --format="value(name)" | head -n 1)
+  fi
   echo "    -> Uploaded Model Resource: ${MODEL_RESOURCE}"
 
-  echo "[2/3] Creating Dedicated Vertex AI Prediction Endpoint in ${REGION}..."
-  ENDPOINT_RESOURCE=$(gcloud ai endpoints create \
+  echo "[2/3] Locating or Creating Dedicated Vertex AI Prediction Endpoint in ${REGION}..."
+  ENDPOINT_RESOURCE=$(gcloud ai endpoints list \
     --region="${REGION}" \
-    --display-name="${ENDPOINT_DISPLAY_NAME}" \
     --project="${PROJECT_ID}" \
-    --format="value(name)")
+    --filter="displayName=${ENDPOINT_DISPLAY_NAME}" \
+    --sort-by="~createTime" \
+    --format="value(name)" | head -n 1 || true)
 
-  echo "    -> Created Endpoint Resource: ${ENDPOINT_RESOURCE}"
+  if [[ -z "${ENDPOINT_RESOURCE}" ]]; then
+    ENDPOINT_RESOURCE=$(gcloud ai endpoints create \
+      --region="${REGION}" \
+      --display-name="${ENDPOINT_DISPLAY_NAME}" \
+      --project="${PROJECT_ID}" \
+      --format="value(name)")
+  fi
+  echo "    -> Endpoint Resource: ${ENDPOINT_RESOURCE}"
 
   echo "[3/3] Deploying Model to Endpoint on NVIDIA L4 GPU (g2-standard-12)..."
   gcloud ai endpoints deploy-model "${ENDPOINT_RESOURCE}" \

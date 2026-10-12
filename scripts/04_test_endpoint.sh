@@ -59,12 +59,12 @@ send_prompt() {
   echo " Looking for: ${expected_signal}"
   echo "--------------------------------------------------------------------------------"
 
-  # Build the Gemma chat-template prompt exactly as the model was trained on
-  local full_prompt="<start_of_turn>user
-${SYSTEM_PROMPT}
-
-${user_prompt}<end_of_turn>
-<start_of_turn>model
+  # Build the Gemma 4 chat-template prompt (<|turn>system...<turn|><|turn>user...<turn|><|turn>model)
+  local full_prompt="<bos><|turn>system
+${SYSTEM_PROMPT}<turn|>
+<|turn>user
+${user_prompt}<turn|>
+<|turn>model
 "
 
   # Write the request body with python3 so quotes/newlines are escaped correctly
