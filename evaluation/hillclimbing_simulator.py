@@ -15,7 +15,7 @@ from typing import Dict, List
 HILLCLIMBING_ITERATIONS: List[Dict] = [
     {
         "version": "v0: Base Model (Zero-Shot)",
-        "model_id": "google/gemma-3-12b-it (Untuned)",
+        "model_id": "google/gemma-4-12B-it (Untuned)",
         "intervention": "Out-of-the-box instruction model with standard system prompt.",
         "slice_scores": {
             "RBI_KYC_AML": 16.5,
@@ -37,7 +37,7 @@ HILLCLIMBING_ITERATIONS: List[Dict] = [
     },
     {
         "version": "v1: Prompt Eng + Few-Shot RAG",
-        "model_id": "google/gemma-3-12b-it + Vertex AI Search RAG",
+        "model_id": "google/gemma-4-12B-it + Vertex AI Search RAG",
         "intervention": "Injected top-3 RBI/SEBI circular chunks + 3-shot examples into 8K prompt window.",
         "slice_scores": {
             "RBI_KYC_AML": 64.2,
@@ -59,7 +59,7 @@ HILLCLIMBING_ITERATIONS: List[Dict] = [
     },
     {
         "version": "v2: First QLoRA SFT (r=8, Attention Only)",
-        "model_id": "google/gemma-3-12b-it (QLoRA r=8, q_proj/v_proj)",
+        "model_id": "google/gemma-4-12B-it (QLoRA r=8, q_proj/v_proj)",
         "intervention": "1 Epoch SFT on 1,200 Indian FSI examples; LoRA applied ONLY to q_proj & v_proj.",
         "slice_scores": {
             "RBI_KYC_AML": 79.4,
@@ -81,7 +81,7 @@ HILLCLIMBING_ITERATIONS: List[Dict] = [
     },
     {
         "version": "v3: Architecture Climb (r=16, All 7 Linear Modules)",
-        "model_id": "google/gemma-3-12b-it (QLoRA r=16, All Linear + bfloat16)",
+        "model_id": "google/gemma-4-12B-it (QLoRA r=16, All Linear + bfloat16)",
         "intervention": "Targeted all 7 linear projections (q/k/v/o + gate/up/down_proj), 3 Epochs, Cosine LR.",
         "slice_scores": {
             "RBI_KYC_AML": 84.5,  # Notice slice lag!
@@ -104,7 +104,7 @@ HILLCLIMBING_ITERATIONS: List[Dict] = [
     },
     {
         "version": "v4: Data-Centric Climb (Targeted Hard Negatives)",
-        "model_id": "google/gemma-3-12b-it (QLoRA r=16 + 150 Hard Negatives)",
+        "model_id": "google/gemma-4-12B-it (QLoRA r=16 + 150 Hard Negatives)",
         "intervention": "Added 150 targeted synthetic examples focusing on PMLA Sec 12A non-tipping-off & 10% UBO edge cases.",
         "slice_scores": {
             "RBI_KYC_AML": 98.2,
