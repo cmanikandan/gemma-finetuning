@@ -61,13 +61,21 @@ fi
 export KMS_KEY_URI="projects/${PROJECT_ID}/locations/${REGION}/keyRings/${KEYRING_NAME}/cryptoKeys/${KEY_NAME}"
 echo "    -> CMEK Key URI: ${KMS_KEY_URI}"
 
-# 3. Grant Cloud Storage & Vertex AI Service Agents Permission to Use CMEK Key
-echo "[3/6] Granting Cloud Storage & Vertex AI Service Agents CMEK Encrypt/Decrypt IAM roles..."
+# 3. Provision & Grant Cloud Storage, Vertex AI, and Artifact Registry Service Agents CMEK IAM Roles
+echo "[3/6] Initializing Service Agents & Granting CMEK Encrypt/Decrypt IAM roles..."
 PROJECT_NUMBER=$(gcloud projects describe "${PROJECT_ID}" --format="value(projectNumber)")
-GCS_SA="service-${PROJECT_NUMBER}@gs-project-accounts.iam.gserviceaccount.com"
-VERTEX_SA="service-${PROJECT_NUMBER}@gcp-sa-aiplatform.iam.gserviceaccount.com"
 
-for SA in "${GCS_SA}" "${VERTEX_SA}"; do
+# On a brand-new GCP project, Google Cloud lazily creates Service Agents.
+# Explicitly trigger their creation before binding KMS IAM policies:
+GCS_SA=$(gcloud storage service-agent --project="${PROJECT_ID}" 2>/dev/null || echo "service-${PROJECT_NUMBER}@gs-project-accounts.iam.gserviceaccount.com")
+gcloud beta services identity create --service=aiplatform.googleapis.com --project="${PROJECT_ID}" --quiet >/dev/null 2>&1 || true
+gcloud beta services identity create --service=artifactregistry.googleapis.com --project="${PROJECT_ID}" --quiet >/dev/null 2>&1 || true
+
+VERTEX_SA="service-${PROJECT_NUMBER}@gcp-sa-aiplatform.iam.gserviceaccount.com"
+AR_SA="service-${PROJECT_NUMBER}@gcp-sa-artifactregistry.iam.gserviceaccount.com"
+
+for SA in "${GCS_SA}" "${VERTEX_SA}" "${AR_SA}"; do
+  echo "    -> Binding roles/cloudkms.cryptoKeyEncrypterDecrypter to ${SA}..."
   gcloud kms keys add-iam-policy-binding "${KEY_NAME}" \
     --keyring="${KEYRING_NAME}" \
     --location="${REGION}" \
