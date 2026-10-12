@@ -1,0 +1,33 @@
+# Exclude reference artifacts from other tools (must never be pushed to GitHub)
+othertools/
+
+# Python virtual environments & cache
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local model checkpoints, outputs, and scratch runs
+runs/
+output/
+checkpoints/
+*.safetensors
+*.bin
+*.gguf
+
+# OS & Editor files
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Environment & credentials
+.env
+.env.*
+*.pem
+*.key

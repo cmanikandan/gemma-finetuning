@@ -1,0 +1,66 @@
+{
+  "seed": 42,
+  "system_prompt_sha256": "d7922ab9678a16de9e90ee076f6f955b6bd742a6c3d3eb654cd2a3dd0ba2a42c",
+  "splits": {
+    "train": {
+      "file": "indian_fsi_sft_train.jsonl",
+      "rows": 1200,
+      "sha256": "5937faa4a64ba0dd3f284f7bfe19424f9885ad3b8c628d8a629f27a1f9b9fce5",
+      "domains": {
+        "DIGITAL_LENDING_KFS": 240,
+        "ISO20022_PAYMENTS_OPS": 240,
+        "NPCI_UPI_DISPUTE": 240,
+        "RBI_KYC_AML": 240,
+        "SEBI_CAPITAL_MARKETS": 240
+      }
+    },
+    "val": {
+      "file": "indian_fsi_sft_val.jsonl",
+      "rows": 150,
+      "sha256": "3319a8ac48e4cf5936b524774e4c08078a62488a6e9ef530fc10ef42eb612bec",
+      "domains": {
+        "DIGITAL_LENDING_KFS": 30,
+        "ISO20022_PAYMENTS_OPS": 30,
+        "NPCI_UPI_DISPUTE": 30,
+        "RBI_KYC_AML": 30,
+        "SEBI_CAPITAL_MARKETS": 30
+      }
+    },
+    "test_id": {
+      "file": "indian_fsi_sft_test.jsonl",
+      "rows": 150,
+      "sha256": "60bbd5bd4f401132aaf5f17b42196eb5850e64a7437dd74da23d551ebd64fbfa",
+      "domains": {
+        "DIGITAL_LENDING_KFS": 30,
+        "ISO20022_PAYMENTS_OPS": 30,
+        "NPCI_UPI_DISPUTE": 30,
+        "RBI_KYC_AML": 30,
+        "SEBI_CAPITAL_MARKETS": 30
+      }
+    },
+    "test_ood": {
+      "file": "indian_fsi_sft_test_ood.jsonl",
+      "rows": 150,
+      "sha256": "580b21cc64f602f5a93ddd3ff5794a7770b725f16815d6dfd398e75ec7046725",
+      "domains": {
+        "DIGITAL_LENDING_KFS": 30,
+        "ISO20022_PAYMENTS_OPS": 30,
+        "NPCI_UPI_DISPUTE": 30,
+        "RBI_KYC_AML": 30,
+        "SEBI_CAPITAL_MARKETS": 30
+      }
+    },
+    "challenge": {
+      "file": "indian_fsi_sft_challenge.jsonl",
+      "rows": 25,
+      "sha256": "7bcfe4ea6d5e13d2dfa5201166a06b0364b196b6e0b8ca44e71df8062ec4846c",
+      "domains": {
+        "DIGITAL_LENDING_KFS": 5,
+        "ISO20022_PAYMENTS_OPS": 5,
+        "NPCI_UPI_DISPUTE": 5,
+        "RBI_KYC_AML": 5,
+        "SEBI_CAPITAL_MARKETS": 5
+      }
+    }
+  }
+}
