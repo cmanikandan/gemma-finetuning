@@ -94,7 +94,7 @@ chmod +x scripts/*.sh
 | 1 | `gcloud` CLI, active account, ADC | You are authenticated and Application Default Credentials exist |
 | 2 | Project exists + billing enabled | You won't fail 20 minutes into a GPU job |
 | 3 | 6 required APIs enabled | `aiplatform`, `storage`, `cloudkms`, `artifactregistry`, `cloudbuild`, `compute` |
-| 4 | NVIDIA L4 / T4 GPU quota in your region | The #1 cause of `ZONE_RESOURCE_POOL_EXHAUSTED` |
+| 4 | NVIDIA L4 / T4 GPU quota in your region | Verifies regional GPU quota is configured |
 | 5 | `HF_TOKEN` is set | Prevents the gated-repo failure above |
 | 6 | `python3` available | Needed for the stdlib data scripts |
 | 7 | All required repo files present | Catches a partial clone or bad upload |
@@ -333,11 +333,10 @@ Saving merged model to gs://.../merged_model_bf16
 
 | Error | Cause & Fix |
 | :--- | :--- |
-| `ZONE_RESOURCE_POOL_EXHAUSTED` / `RESOURCE_EXHAUSTED` | Check regional GPU quota or see [Appendix A: Multi-Region & Accelerator Options](#appendix-a--multi-region-configuration-quota-setup--accelerator-options). |
+| GPU quota error on job submission | Check regional GPU quota in IAM & Admin → Quotas or see [Appendix A: Multi-Region & Accelerator Options](#appendix-a--multi-region-configuration-quota-setup--accelerator-options). |
 | `401 Unauthorized` / `GatedRepoError` on model download | Set `HF_TOKEN` and re-run. |
 | `CUDA out of memory` | Your model is too big for the GPU. Drop to `google/gemma-4-E4B-it`, or reduce `--batch-size` to 1 and raise `--grad-accum` to 16 (keeps effective batch size at 16). |
 | Loss becomes `nan` after a few steps | Almost always `float16` instead of `bfloat16`. Gemma's attention soft-capping overflows fp16. Confirm the job is on an L4/A100 (native bf16) — **T4 GPUs cannot do bf16**, which is why the T4 path uses a smaller model with explicit settings. |
-| Job stuck in `JOB_STATE_PENDING` > 15 min | Capacity queueing. Either wait, or cancel and switch region. |
 | `Permission denied` writing to `gs://...` | The Vertex AI service agent lacks CMEK decrypt rights. Re-run Step 3 — it grants exactly this. |
 
 > [!TIP]
@@ -447,7 +446,6 @@ Deploying (this takes 15-20 minutes)...
 | Error | Cause & Fix |
 | :--- | :--- |
 | `No merged model found under gs://.../models/` | Step 4 didn't finish, or finished without `--merge-weights`. Confirm with `gcloud storage ls gs://${BUCKET_NAME}/models/**/merged_model_bf16/config.json`. |
-| Deployment hangs > 30 min then fails | Usually L4 capacity in the region. Retry, or deploy to a region with more GPU headroom (see Appendix A). |
 | `Model server never became ready` | The merged model directory is incomplete (missing `tokenizer.json` or a `.safetensors` shard). Re-run Step 4. |
 | Want a cheaper, scale-to-zero option? | `export DEPLOY_TARGET="cloud-run-gpu"` — Cloud Run with an L4 scales to zero when idle, so you pay only per request-second. Trade-off: multi-second cold starts while the model reloads. |
 
@@ -623,26 +621,18 @@ Every script in this repository is parameterized so you can target any Google Cl
 
 ### Option 1: Multi-Region Parameterization (`REGION`)
 
-Because the bootcamp uses **synthetic data with zero real customer PII**, the training math and resulting weights are identical across all regions. Every script reads `${REGION}`:
+Every script dynamically reads `${REGION}` (defaulting to `asia-south1`):
 
 ```bash
-export REGION="asia-southeast1"   # or asia-south1, us-central1, europe-west4
+export REGION="asia-south1"   # or your project's target region
 
 ./scripts/01_setup_sovereign_infra.sh
 ./scripts/02_submit_vertex_finetuning.sh
 ```
 
-**Train-anywhere, deploy-regional pattern**: If a model is trained on synthetic data in a global dev project/region, you can copy the merged weights into your regional bucket for regional serving:
+### Option 2: Configuring the GPU Tier (`NVIDIA L4`, `A100`, or `T4`)
 
-```bash
-gcloud storage cp -r \
-  gs://source-bucket/models/<run>/merged_model_bf16 \
-  gs://target-regional-bucket/models/imported/
-```
-
-### Option 2: Running on NVIDIA T4 (`16 GB` VRAM) Hardware
-
-If your project quota is configured for **NVIDIA T4 (`n1-standard-8`)** rather than `NVIDIA L4`, you can run the pipeline using the compact `google/gemma-4-E4B-it` model:
+If your project quota is configured for **NVIDIA T4 (`n1-standard-8`)** or you want to train the compact `google/gemma-4-E4B-it` model:
 
 ```bash
 export MACHINE_TYPE="n1-standard-8"
@@ -653,10 +643,6 @@ export BASE_MODEL_ID="google/gemma-4-E4B-it"   # Compact Gemma 4 E4B model for T
 
 > [!NOTE]
 > **Hardware Recommendation**: NVIDIA L4 (Ada Lovelace) has native `bfloat16` support, whereas T4 (Turing) does not. When using T4, select a compact checkpoint (`google/gemma-4-E4B-it` or `google/gemma-3-4b-it`).
-
-### Option 3: Dynamic Workload Scheduler (`DWS`) for Batch Pipelines
-
-For scheduled production retraining jobs, Vertex AI Custom Training supports **DWS `FLEX_START`**, which queues the training request and automatically provisions the GPU cluster as scheduled capacity becomes available.
 
 ---
 

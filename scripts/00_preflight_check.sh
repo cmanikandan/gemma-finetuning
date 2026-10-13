@@ -118,11 +118,10 @@ elif [[ -n "${T4_QUOTA}" && "${T4_QUOTA%.*}" -gt 0 ]]; then
   echo "         -> Use a T4 and the compact Gemma 4 E4B model: export BASE_MODEL_ID=google/gemma-4-E4B-it"
   echo "            export MACHINE_TYPE=n1-standard-8 ACCELERATOR_TYPE=NVIDIA_TESLA_T4"
 else
-  warn "No GPU quota detected in ${REGION}. You have three options:"
+  warn "No GPU quota detected in ${REGION}. Options:"
   echo "         (a) Request quota: https://console.cloud.google.com/iam-admin/quotas?project=${PROJECT_ID}"
   echo "             Filter for 'NVIDIA L4 GPUs' in ${REGION}, select it, and click EDIT QUOTAS."
-  echo "         (b) Switch region:  export REGION=asia-southeast1   (or us-central1)"
-  echo "         (c) Use Dynamic Workload Scheduler to queue until capacity frees up."
+  echo "         (b) Or set REGION to a region where your project already has GPU quota configured."
 fi
 echo "       Note: Vertex AI Custom Training uses a separate 'Custom model training' quota pool."
 echo "       Check it at: https://console.cloud.google.com/iam-admin/quotas?project=${PROJECT_ID}"

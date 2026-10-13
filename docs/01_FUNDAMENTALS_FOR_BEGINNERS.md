@@ -494,7 +494,7 @@ This says: "We're 95% confident the true Base score is between 1.9% and 2.0%, an
 | Model outputs run on forever / never stops | Chat template mismatch — the model never learned to emit `<end_of_turn>` | Verify your training text ends with `<end_of_turn>` exactly as in `format_gemma_chat()`. |
 | Model answers in a generic way, ignoring your training | Wrong `dataset_text_field`, or the model isn't actually seeing your formatted text | Print one raw training row and confirm it contains the `<start_of_turn>` tags. |
 | `403 PERMISSION_DENIED` on the Gemma weights | You haven't accepted the Gemma license on Hugging Face, or `HF_TOKEN` isn't set | Visit the model page on Hugging Face, accept the license, create a read token, then `export HF_TOKEN=hf_...`. |
-| `ZONE_RESOURCE_POOL_EXHAUSTED` | No free L4 GPUs in that zone right now | Switch region (`export REGION=asia-southeast1`), fall back to a T4, or use Dynamic Workload Scheduler. See Module 10 in the [main README](../README.md). |
+| GPU quota error on job submission | Regional GPU quota (`NVIDIA_L4_GPUS`) has not been requested in the project yet | Request GPU quota under **IAM & Admin → Quotas**, or configure your target region/GPU tier (`REGION`, `MACHINE_TYPE`, `BASE_MODEL_ID`). See Module 10 in the [main README](../README.md). |
 | Great eval score but terrible real-world answers | Your eval set leaked into training, or your eval only measures surface overlap | Re-run [`data/inspect_dataset.py`](../data/inspect_dataset.py) and confirm 0 overlap. Add an LLM-as-a-Judge tier. |
 
 ---

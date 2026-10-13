@@ -657,28 +657,29 @@ You do **NOT** need a local GPU, local Docker, or `uv` on your MacBook. Choose e
 
 ---
 
-### 2. Multi-Region Configuration, Project Quota Setup & Accelerator Flexibility
-Every script and notebook in this repository is parameterized so teams can adapt the pipeline to their organization's project quotas, preferred development regions, and available GPU tiers:
+### 2. Multi-Region & Accelerator Configuration (`REGION`, `MACHINE_TYPE`, `BASE_MODEL_ID`)
+Every script and notebook in this repository is parameterized so teams can adapt the pipeline to their organization's target region and GPU hardware profile:
 
-#### Option 1: Multi-Region Parameterization (`REGION` Environment Variable)
-When prototyping with synthetic data (which contains zero real customer PII), **the fine-tuning code, math, and resulting model weights are 100% identical in every Google Cloud region**.
-- Every script dynamically reads the `${REGION}` environment variable (defaulting to `asia-south1`). To run the pipeline in any other region where your team holds GPU quota (such as `asia-south2`, `asia-southeast1`, `us-central1`, or `europe-west4`), simply export `REGION` before running:
-  ```bash
-  export REGION="asia-southeast1"   # or asia-south1, us-central1, europe-west4
-  ./scripts/01_setup_sovereign_infra.sh
-  ./scripts/02_submit_vertex_finetuning.sh
-  ```
-- **Train-Anywhere, Deploy-Regional Pattern**: If a development team trains a model on synthetic data in a global dev/test project, the resulting merged `.safetensors` weights can be copied into the regional production bucket (`gcloud storage cp -r gs://dev-bucket/merged_model_bf16 gs://prod-sovereign-bucket/`) for regional deployment.
+#### Option 1: Configuring the Target Region (`REGION` Environment Variable)
+Every script dynamically reads the `${REGION}` environment variable (defaulting to `asia-south1`). To run the workflow in any Google Cloud region configured for your project (`asia-south1`, `asia-south2`, `asia-southeast1`, `us-central1`, `europe-west4`, etc.), export `REGION` before running:
+```bash
+export REGION="asia-south1"   # or your project's target region
+./scripts/01_setup_sovereign_infra.sh
+./scripts/02_submit_vertex_finetuning.sh
+```
 
-#### Option 2: Automatic GPU Hardware Detection (`NVIDIA L4`, `A100`, or `T4`)
-Different sandbox and enterprise projects may have quota allocated for different GPU families (`NVIDIA L4`, `NVIDIA A100`, or `NVIDIA T4`).
-- **Automatic Hardware Detection Built Into Our Notebook**:
-  When you run **Cell 1** of [`notebooks/Gemma_FSI_Sovereign_FineTuning_Bootcamp.ipynb`](notebooks/Gemma_FSI_Sovereign_FineTuning_Bootcamp.ipynb), our Python code checks `torch.cuda.get_device_properties(0).total_memory`:
+#### Option 2: Configuring the GPU Tier & Model Checkpoint (`NVIDIA L4`, `A100`, or `T4`)
+You can match the model size to the GPU family configured in your environment:
+- **Automatic Hardware Detection in the Notebook**:
+  When you run **Cell 1** of [`notebooks/Gemma_FSI_Sovereign_FineTuning_Bootcamp.ipynb`](notebooks/Gemma_FSI_Sovereign_FineTuning_Bootcamp.ipynb), the setup cell inspects `torch.cuda.get_device_properties(0).total_memory`:
   - On **24 GB+ VRAM (`NVIDIA L4` / `A100`)**, it selects **`google/gemma-4-12B-it`** (`~13.8 GB` VRAM).
-  - On **16 GB VRAM (`NVIDIA T4` / `n1-standard-8`)**, it automatically selects a compact checkpoint (**`google/gemma-4-E4B-it`** or **`google/gemma-3-4b-it`**), allowing you to run the complete QLoRA workflow within 16 GB VRAM.
-
-#### Option 3: Scheduled Batch Provisioning with Dynamic Workload Scheduler (`DWS`)
-For automated production retraining pipelines or large multi-GPU jobs, Vertex AI Custom Training supports **Dynamic Workload Scheduler (`FLEX_START`)**, which queues training requests and automatically provisions the target GPU cluster as scheduled capacity becomes available.
+  - On **16 GB VRAM (`NVIDIA T4` / `n1-standard-8`)**, it automatically selects **`google/gemma-4-E4B-it`** (or `google/gemma-3-4b-it`), fitting comfortably within 16 GB VRAM.
+- **CLI Override**:
+  ```bash
+  export MACHINE_TYPE="g2-standard-12"
+  export ACCELERATOR_TYPE="NVIDIA_L4"
+  export BASE_MODEL_ID="google/gemma-4-12B-it"   # or google/gemma-4-E4B-it
+  ```
 
 ---
 
@@ -769,8 +770,8 @@ When moving from a single-replica bootcamp lab to **real-world Indian FSI produc
 ### Part A: Best Practices for Deploying in Production at Scale
 
 #### 1. Upgrade the Serving Engine: From `model.generate()` to **vLLM (`PagedAttention` + Continuous Batching)**
-Why did we have to cap `MAX_TOKENS=160` in our lab smoke test?
-- Standard Hugging Face `model.generate()` with 4-bit `bitsandbytes` (`NF4`) dequantizes weights on the fly for a **single request at a time** (`~7.5 tokens/sec`), which means a 500-token response takes ~65 seconds and hits Vertex AI's 60-second HTTP gateway timeout.
+Why did we use `serve_gemma_vertex.py` with `MAX_TOKENS=160` in our lab smoke test, and what changes for high-concurrency production?
+- Standard Hugging Face `model.generate()` with 4-bit `bitsandbytes` (`NF4`) dequantizes weights on the fly for a **single request at a time** (`~7.5 tokens/sec`), which is great for a lightweight single-user lab test but not designed for concurrent multi-user production traffic.
 - In production, always serve the merged model with **vLLM** using **FP8 (`--quantization fp8` on NVIDIA L4/H100)** or **AWQ 4-bit kernels** (or `bfloat16` across 2x L4 GPUs on `g2-standard-24`):
 
 | Serving Capability | Bootcamp Lab Container (`serve_gemma_vertex.py`) | Production vLLM Engine (`vllm/vllm-openai` + FP8/AWQ) | Production Impact |
@@ -778,7 +779,7 @@ Why did we have to cap `MAX_TOKENS=160` in our lab smoke test?
 | **Batching Strategy** | Static (1 request at a time per replica) | **Continuous Iteration-Level Batching** (`--max-num-seqs=64`) | **15x–30x higher concurrent QPS** per GPU |
 | **KV-Cache Memory** | Contiguous tensor allocation (wastes ~60% VRAM) | **PagedAttention** (`--gpu-memory-utilization=0.92`) | Eliminates KV-cache fragmentation; fits **4x more concurrent users** |
 | **System Prompt Processing** | Recomputes the 200-token RBI system prompt on every call | **Automatic Prefix Caching** (`--enable-prefix-caching`) | Caches the RBI system prompt in GPU HBM; cuts **Time-to-First-Token (TTFT) by ~70% (`< 25 ms`)** |
-| **Generation Speed** | `~7.5 tokens/sec` (4-bit NF4 dequantization) | **`~55–85 tokens/sec`** per stream (L4 FP8 / AWQ Tensor Cores) | Full 500-token regulatory runbook completes in **`~6–8 seconds`** (never hits the 60s timeout!) |
+| **Generation Speed** | `~7.5 tokens/sec` (4-bit NF4 dequantization) | **`~55–85 tokens/sec`** per stream (L4 FP8 / AWQ Tensor Cores) | Full 500-token regulatory runbook completes in **`~6–8 seconds`** |
 | **Structured JSON Output** | Prompt-based + `enable_thinking=False` | **Guided Constrained Decoding** (`guided_json` / `xgrammar`) | **100.0% guaranteed valid JSON** at the token-sampling level |
 
 #### 2. Choosing the Right Google Cloud Runtime for Your Traffic Pattern
