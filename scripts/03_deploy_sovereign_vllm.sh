@@ -171,28 +171,7 @@ os.execvp('python3', ['python3', '/tmp/serve_gemma_vertex.py'])
 print(base64.b64encode(code.encode()).decode())
 ")
 
-  echo "[1/3] Uploading Fine-Tuned Gemma Model to Vertex AI Model Registry (${REGION})..."
-  gcloud ai models upload \
-    --region="${REGION}" \
-    --display-name="${MODEL_DISPLAY_NAME}" \
-    --container-image-uri="${SERVE_IMAGE_URI}" \
-    --artifact-uri="${MODEL_ARTIFACT_GCS_URI}" \
-    --container-command="python3" \
-    --container-args="^|^-c|import base64;exec(base64.b64decode('${BOOTSTRAP_B64}'))" \
-    --container-ports=8080 \
-    --container-predict-route="/predict" \
-    --container-health-route="/health" \
-    --project="${PROJECT_ID}" >/dev/null
-
-  MODEL_RESOURCE=$(gcloud ai models list \
-    --region="${REGION}" \
-    --project="${PROJECT_ID}" \
-    --filter="displayName=${MODEL_DISPLAY_NAME}" \
-    --sort-by="~createTime" \
-    --format="value(name)" 2>/dev/null | head -n 1)
-  echo "    -> Uploaded Model Resource: ${MODEL_RESOURCE}"
-
-  echo "[2/3] Locating or Creating Dedicated Vertex AI Prediction Endpoint in ${REGION}..."
+  echo "[1/3] Locating or Creating Dedicated Vertex AI Prediction Endpoint in ${REGION}..."
   ENDPOINT_RESOURCE=$(gcloud ai endpoints list \
     --region="${REGION}" \
     --project="${PROJECT_ID}" \
@@ -209,18 +188,49 @@ print(base64.b64encode(code.encode()).decode())
   fi
   echo "    -> Endpoint Resource: ${ENDPOINT_RESOURCE}"
 
-  echo "[3/3] Deploying Model to Endpoint on NVIDIA L4 GPU (g2-standard-12) as ${COMPUTE_SA}..."
-  echo "      (Note: Provisioning the GPU VM and loading the 12B checkpoint takes ~10-15 minutes)"
-  gcloud ai endpoints deploy-model "${ENDPOINT_RESOURCE}" \
+  EXISTING_DEPLOYED=$(gcloud ai endpoints describe "${ENDPOINT_RESOURCE}" \
     --region="${REGION}" \
-    --model="${MODEL_RESOURCE}" \
-    --display-name="${MODEL_DISPLAY_NAME}-v1" \
-    --machine-type="g2-standard-12" \
-    --accelerator="type=nvidia-l4,count=1" \
-    --service-account="${COMPUTE_SA}" \
-    --min-replica-count=1 \
-    --max-replica-count=1 \
-    --project="${PROJECT_ID}"
+    --project="${PROJECT_ID}" \
+    --format="value(deployedModels[0].id)" 2>/dev/null || true)
 
-  echo "[+] Vertex AI Dedicated GPU Endpoint Deployed in ${REGION}!"
+  if [[ -n "${EXISTING_DEPLOYED}" && "${FORCE_REDEPLOY:-0}" != "1" ]]; then
+    echo "[+] Endpoint ${ENDPOINT_RESOURCE} already has an active deployed model (${EXISTING_DEPLOYED})!"
+    echo "    Skipping duplicate deployment (export FORCE_REDEPLOY=1 to force a new deployment)."
+  else
+    echo "[2/3] Uploading Fine-Tuned Gemma Model to Vertex AI Model Registry (${REGION})..."
+    gcloud ai models upload \
+      --region="${REGION}" \
+      --display-name="${MODEL_DISPLAY_NAME}" \
+      --container-image-uri="${SERVE_IMAGE_URI}" \
+      --artifact-uri="${MODEL_ARTIFACT_GCS_URI}" \
+      --container-command="python3" \
+      --container-args="^|^-c|import base64;exec(base64.b64decode('${BOOTSTRAP_B64}'))" \
+      --container-ports=8080 \
+      --container-predict-route="/predict" \
+      --container-health-route="/health" \
+      --project="${PROJECT_ID}" >/dev/null
+
+    MODEL_RESOURCE=$(gcloud ai models list \
+      --region="${REGION}" \
+      --project="${PROJECT_ID}" \
+      --filter="displayName=${MODEL_DISPLAY_NAME}" \
+      --sort-by="~createTime" \
+      --format="value(name)" 2>/dev/null | head -n 1)
+    echo "    -> Uploaded Model Resource: ${MODEL_RESOURCE}"
+
+    echo "[3/3] Deploying Model to Endpoint on NVIDIA L4 GPU (g2-standard-12) as ${COMPUTE_SA}..."
+    echo "      (Note: Provisioning the GPU VM and loading the 12B checkpoint takes ~10-15 minutes)"
+    gcloud ai endpoints deploy-model "${ENDPOINT_RESOURCE}" \
+      --region="${REGION}" \
+      --model="${MODEL_RESOURCE}" \
+      --display-name="${MODEL_DISPLAY_NAME}-v1" \
+      --machine-type="g2-standard-12" \
+      --accelerator="type=nvidia-l4,count=1" \
+      --service-account="${COMPUTE_SA}" \
+      --min-replica-count=1 \
+      --max-replica-count=1 \
+      --project="${PROJECT_ID}"
+
+    echo "[+] Vertex AI Dedicated GPU Endpoint Deployed in ${REGION}!"
+  fi
 fi

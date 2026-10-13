@@ -41,12 +41,43 @@ if [[ -z "${DEPLOYED}" ]]; then
 fi
 echo "[+] Deployed model: ${DEPLOYED}"
 
+# If multiple models were deployed by repeated runs, undeploy any extra 0%-traffic replica to save GPU cost
+EXTRA_DEPLOYED_IDS=$(gcloud ai endpoints describe "${ENDPOINT_ID}" --region="${REGION}" \
+  --project="${PROJECT_ID}" --format="json" 2>/dev/null | python3 -c "
+import json, sys
+try:
+    ep = json.load(sys.stdin)
+    splits = ep.get('trafficSplit', {})
+    models = ep.get('deployedModels', [])
+    if len(models) > 1:
+        for m in models[1:]:
+            mid = m.get('id')
+            if mid and str(splits.get(mid, 0)) == '0':
+                print(mid)
+except Exception:
+    pass
+")
+for extra_id in ${EXTRA_DEPLOYED_IDS}; do
+  echo "[*] Cleaning up duplicate 0%-traffic deployedModel replica (${extra_id}) to avoid double GPU billing..."
+  gcloud ai endpoints undeploy-model "${ENDPOINT_ID}" \
+    --deployed-model-id="${extra_id}" \
+    --region="${REGION}" \
+    --project="${PROJECT_ID}" --quiet >/dev/null 2>&1 &
+done
+
+echo "[*] Recent container logs from Endpoint ${ENDPOINT_ID}:"
+gcloud logging read "resource.type=\"aiplatform.googleapis.com/Endpoint\" AND resource.labels.endpoint_id=\"${ENDPOINT_ID}\"" \
+  --project="${PROJECT_ID}" \
+  --limit=12 \
+  --format="value(jsonPayload.message,textPayload)" 2>/dev/null | grep -v "^$" | head -n 10 | sed 's/^/    | /' || true
+
 ENDPOINT_URL="https://${REGION}-aiplatform.googleapis.com/v1/projects/${PROJECT_ID}/locations/${REGION}/endpoints/${ENDPOINT_ID}:predict"
+export MAX_TOKENS="${MAX_TOKENS:-160}"
 
 # ------------------------------------------------------------------------------
 # Three representative Indian FSI test prompts, one per regulatory domain
 # ------------------------------------------------------------------------------
-SYSTEM_PROMPT="You are a Principal Financial Regulatory & Operations AI Assistant specialized in Indian Banking, Financial Services, and Insurance (BFSI) compliance. Your responses must strictly adhere to Reserve Bank of India (RBI), Securities and Exchange Board of India (SEBI), and National Payments Corporation of India (NPCI) master circulars."
+SYSTEM_PROMPT="You are a Principal Financial Regulatory & Operations AI Assistant specialized in Indian Banking, Financial Services, and Insurance (BFSI) compliance. Your responses must strictly adhere to Reserve Bank of India (RBI), Securities and Exchange Board of India (SEBI), and National Payments Corporation of India (NPCI) master circulars. Provide a concise 3-bullet answer with exact circular citations and rupee math."
 
 send_prompt() {
   local test_name="$1"
@@ -68,6 +99,7 @@ ${user_prompt}<turn|>
 "
 
   # Write the request body with python3 so quotes/newlines are escaped correctly
+  # Note: max_tokens=160 ensures 4-bit NF4 generation finishes in ~15-20s (well under Vertex AI's 60s HTTP timeout)
   python3 -c "
 import json, sys
 body = {
@@ -77,13 +109,13 @@ body = {
       {'role': 'system', 'content': sys.argv[2]},
       {'role': 'user', 'content': sys.argv[3]}
     ],
-    'max_tokens': 512,
-    'temperature': 0.1,
+    'max_tokens': int(sys.argv[4]),
+    'temperature': 0.0,
     'top_p': 0.95
   }]
 }
 print(json.dumps(body))
-" "${full_prompt}" "${SYSTEM_PROMPT}" "${user_prompt}" > /tmp/fsi_request.json
+" "${full_prompt}" "${SYSTEM_PROMPT}" "${user_prompt}" "${MAX_TOKENS}" > /tmp/fsi_request.json
 
   START_MS=$(python3 -c "import time; print(int(time.time()*1000))")
   RESPONSE=$(curl -s -X POST \
