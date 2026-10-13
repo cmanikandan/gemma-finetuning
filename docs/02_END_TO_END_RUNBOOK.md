@@ -119,7 +119,7 @@ chmod +x scripts/*.sh
 | `FAIL: No active gcloud account` | `gcloud auth login && gcloud auth application-default login` |
 | `FAIL: API not enabled: aiplatform.googleapis.com` | `gcloud services enable aiplatform.googleapis.com storage.googleapis.com cloudkms.googleapis.com artifactregistry.googleapis.com cloudbuild.googleapis.com compute.googleapis.com --project="${PROJECT_ID}"` |
 | `FAIL: Billing is not enabled` | Link a billing account in the Console. Vertex AI GPU jobs cannot run on a project without billing. |
-| `WARN: NVIDIA_L4 quota is 0 in asia-south1` | Request quota, or jump to [Handling GPU Stockouts](#appendix-a--what-if-i-cant-get-a-gpu-in-india) below. |
+| `WARN: NVIDIA_L4 quota is 0` | Request regional GPU quota in IAM & Admin → Quotas, or see [Appendix A: Multi-Region & Accelerator Options](#appendix-a--multi-region-configuration-quota-setup--accelerator-options) below. |
 
 > [!NOTE]
 > A **WARN** is not fatal — the script exits `0` on warnings and `1` only on hard failures. A common benign warning is the GPU quota check being unable to read quota metrics due to IAM scope; you'll discover the real answer in Step 4.
@@ -333,7 +333,7 @@ Saving merged model to gs://.../merged_model_bf16
 
 | Error | Cause & Fix |
 | :--- | :--- |
-| `ZONE_RESOURCE_POOL_EXHAUSTED` / `RESOURCE_EXHAUSTED` | No L4 capacity in that zone right now. See [Appendix A](#appendix-a--what-if-i-cant-get-a-gpu-in-india). |
+| `ZONE_RESOURCE_POOL_EXHAUSTED` / `RESOURCE_EXHAUSTED` | Check regional GPU quota or see [Appendix A: Multi-Region & Accelerator Options](#appendix-a--multi-region-configuration-quota-setup--accelerator-options). |
 | `401 Unauthorized` / `GatedRepoError` on model download | Set `HF_TOKEN` and re-run. |
 | `CUDA out of memory` | Your model is too big for the GPU. Drop to `google/gemma-4-E4B-it`, or reduce `--batch-size` to 1 and raise `--grad-accum` to 16 (keeps effective batch size at 16). |
 | Loss becomes `nan` after a few steps | Almost always `float16` instead of `bfloat16`. Gemma's attention soft-capping overflows fp16. Confirm the job is on an L4/A100 (native bf16) — **T4 GPUs cannot do bf16**, which is why the T4 path uses a smaller model with explicit settings. |
@@ -617,33 +617,32 @@ See **[README Module 12](../README.md#17-module-12-production-mlops-deploying-at
 
 ---
 
-## Appendix A — What If I Can't Get a GPU in India?
+## Appendix A — Multi-Region Configuration, Quota Setup & Accelerator Options
 
-`ZONE_RESOURCE_POOL_EXHAUSTED` in `asia-south1` is common during Indian business hours. You have three options:
+Every script in this repository is parameterized so you can target any Google Cloud region or GPU accelerator family allocated to your project:
 
-### Option 1: Switch Region (30 seconds, best for learning)
+### Option 1: Multi-Region Parameterization (`REGION`)
 
-Because the bootcamp uses **synthetic data with zero real customer PII**, the training math is identical in any region. Every script reads `${REGION}`:
+Because the bootcamp uses **synthetic data with zero real customer PII**, the training math and resulting weights are identical across all regions. Every script reads `${REGION}`:
 
 ```bash
-export REGION="asia-southeast1"   # Singapore — closest to India
-# or "us-central1" — Google Cloud's largest L4/A100/H100 pool
+export REGION="asia-southeast1"   # or asia-south1, us-central1, europe-west4
 
 ./scripts/01_setup_sovereign_infra.sh
 ./scripts/02_submit_vertex_finetuning.sh
 ```
 
-**"Train global, deploy sovereign" pattern**: train wherever capacity exists, then copy the merged weights back to Mumbai and serve only from `asia-south1`:
+**Train-anywhere, deploy-regional pattern**: If a model is trained on synthetic data in a global dev project/region, you can copy the merged weights into your regional bucket for regional serving:
 
 ```bash
 gcloud storage cp -r \
   gs://source-bucket/models/<run>/merged_model_bf16 \
-  gs://mumbai-sovereign-bucket/models/imported/
+  gs://target-regional-bucket/models/imported/
 ```
 
-### Option 2: Fall Back to a T4 Inside Mumbai
+### Option 2: Running on NVIDIA T4 (`16 GB` VRAM) Hardware
 
-`n1-standard-8` + 1x **NVIDIA T4 (16 GB)** almost always has capacity in `asia-south1`:
+If your project quota is configured for **NVIDIA T4 (`n1-standard-8`)** rather than `NVIDIA L4`, you can run the pipeline using the compact `google/gemma-4-E4B-it` model:
 
 ```bash
 export MACHINE_TYPE="n1-standard-8"
@@ -652,12 +651,12 @@ export BASE_MODEL_ID="google/gemma-4-E4B-it"   # Compact Gemma 4 E4B model for T
 ./scripts/02_submit_vertex_finetuning.sh
 ```
 
-> [!WARNING]
-> **Prefer L4 over T4 whenever possible.** NVIDIA L4 (Ada Lovelace) has native `bfloat16` support, whereas T4 (Turing) does not. If using T4, always use a compact checkpoint (`google/gemma-4-E4B-it` or `google/gemma-3-4b-it`).
+> [!NOTE]
+> **Hardware Recommendation**: NVIDIA L4 (Ada Lovelace) has native `bfloat16` support, whereas T4 (Turing) does not. When using T4, select a compact checkpoint (`google/gemma-4-E4B-it` or `google/gemma-3-4b-it`).
 
-### Option 3: Dynamic Workload Scheduler (production pattern)
+### Option 3: Dynamic Workload Scheduler (`DWS`) for Batch Pipelines
 
-For a bank that *must* train on L4/A100 inside `asia-south1`, submit with **DWS `FLEX_START`**. Instead of failing instantly, Vertex AI queues the job and provisions the GPU the moment capacity frees up (typically 15–90 minutes, off-peak).
+For scheduled production retraining jobs, Vertex AI Custom Training supports **DWS `FLEX_START`**, which queues the training request and automatically provisions the GPU cluster as scheduled capacity becomes available.
 
 ---
 

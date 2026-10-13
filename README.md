@@ -102,68 +102,8 @@ Before running any infrastructure, here is the concrete difference between query
 | Here is the extracted transaction information in JSON format:<br/>```json<br/>{"date": "14-10-2026", "type": "UPI Debit", "merchant": "Zomato Media", "amount": 645.5, "utr": "628714992011"}<br/>```<br/>Let me know if you need more transactions parsed! | `{"date":"2026-10-14","rail":"UPI","counterparty":"ZOMATO MEDIA","txn_type":"DEBIT","amount_inr":645.5,"category":"FOOD_DINING","reference_id":"628714992011"}` |
 | **Why Base Fails**: Wraps output in conversational text, uses non-ISO date (`14-10-2026`), invents arbitrary keys (`type`, `merchant`, `utr`), and omits `category`. | **Why Fine-Tuned Wins**: Emits **100% pure, parseable 7-key JSON** with ISO-8601 date, normalized `UPI` rail, `FOOD_DINING` taxonomy, and `628714992011` RRN. |
 
----
-
-## 💰 What Will This Lab Cost Me? (Exact USD & INR Billing Breakdown + Step-by-Step Math)
-
-Running the **entire end-to-end lab costs roughly `$1.10 – $1.45 USD` (`~₹95 – ₹125 INR`)**, **provided you run the cleanup script (`./scripts/99_cleanup_resources.sh --confirm`) when you finish**.
-
-### 1. Google Cloud Unit Pricing in `asia-south1` (Mumbai) Used in Calculations
-
-To give you 100% financial transparency, here are the exact on-demand unit rates in **`asia-south1` (Mumbai)** (using exchange rate `$1 USD = ₹85 INR`):
-
-| GCP Resource SKU (`asia-south1` Mumbai) | Unit Rate (USD) | Unit Rate (INR) | How It Is Billed |
-| :--- | :--- | :--- | :--- |
-| **`g2-standard-12` Host VM** (12 vCPUs, 48 GB RAM) + **1x NVIDIA L4 GPU** (24 GB VRAM) | **`~$1.14 / hour`** *(`$0.44` host + `$0.70` L4 GPU)* | **`~₹97 / hour`** | Billed per-second (1-minute minimum) while the training job or endpoint VM is active. |
-| **Boot / Shuffle Disk** (`200 GB pd-ssd` attached to GPU worker) | **`~$0.05 / hour`** *(`$0.17 / GB-month`)* | **`~₹4 / hour`** | Prorated to the exact minutes the GPU VM exists; destroyed automatically when VM stops. |
-| **Combined `g2-standard-12` + 1x L4 + 200GB SSD Burn Rate** | **`$1.19 / hour`** **(`$0.0198 / minute`)** | **`~₹101 / hour`** **(`₹1.68 / min`)** | **This is the single number that drives 90% of your lab cost.** |
-| **Google Cloud Build** (`e2-highcpu-8` remote container builder) | **`$0.016 / build-min`** *(First 120 mins/day free)* | **`~₹1.36 / min`** | Runs for ~10 mins on your first training submission; cached in Artifact Registry afterwards. |
-| **Cloud KMS CMEK Key Version** (`software` protection level) | **`$0.06 / month`** + `$0.03 / 10k ops` | **`~₹5 / month`** | Flat monthly fee per active key version (`< $0.01` for crypto operations during the lab). |
-| **Cloud Storage Regional (`asia-south1`)** (`~48 GB` base mirror + merged weights) | **`$0.023 / GB-month`** | **`~₹1.95 / GB-mo`** | `48 GB × $0.023 = $1.10/month` if kept all month, or **`$0.004` (`₹0.35`)** if deleted after a 2-hour lab! |
-| **Artifact Registry (`asia-south1`)** (`~8.5 GB` trainer image) | **`$0.10 / GB-month`** *(First 0.5 GB free)* | **`~₹8.50 / GB-mo`** | `8 GB × $0.10 = $0.80/month` if kept all month, or **`$0.002` (`₹0.20`)** if deleted after a 2-hour lab! |
-
----
-
-### 2. Step-by-Step Cost Calculation for a Complete End-to-End Lab Run (`google/gemma-4-12B-it`)
-
-Here is the exact math for every script you run in this bootcamp:
-
-| Lab Step & Script | Resource & Duration | Explicit Cost Calculation Formula | Exact Cost (USD) | Exact Cost (INR) |
-| :--- | :--- | :--- | :--- | :--- |
-| **Step 0: Pre-Flight Check** (`00_preflight_check.sh`) | Read-only `gcloud` CLI checks (~15 sec) | $0 \text{ compute} \times \$0$ | **$0.00** | **₹0** |
-| **Step 1 & 2: Dataset Gen & Audit** (`generate_fsi_dataset.py`, `inspect_dataset.py`) | Cloud Shell CPU (free tier, ~5 sec) | $0 \text{ billable compute}$ | **$0.00** | **₹0** |
-| **Step 3: Sovereign KMS & GCS Setup** (`01_setup_sovereign_infra.sh`) | 1 KMS key version + crypto ops + 2-hr storage | $\$0.06\text{ (KMS)} + \$0.006\text{ (2-hr GCS/AR)}$ | **$0.07** | **~₹6** |
-| **Step 4a: Remote Container Build** (`02_submit_vertex_finetuning.sh` first run) | Cloud Build `e2-highcpu-8` for `10 mins` | $10\text{ min} \times \$0.016/\text{min}$ *(often $0 in free tier)* | **$0.16** *(or $0.00)* | **~₹14** *(or ₹0)* |
-| **Step 4b: QLoRA Fine-Tuning Job** (`02_submit_vertex_finetuning.sh`) | `g2-standard-12` (1x L4) for **`32 mins`** (VM boot + 75 steps + BF16 merge + GCS upload) | $\dfrac{32\text{ mins}}{60\text{ mins/hr}} \times \$1.19/\text{hr}$ *(Auto-terminates!)* | **$0.63** | **~₹54** |
-| **Step 5: Offline Benchmark & Hillclimb** (`evaluate_fsi_model.py`, `passbook_parser_benchmark.py`) | Cloud Shell CPU (free tier, ~5 sec) | $0 \text{ billable compute}$ | **$0.00** | **₹0** |
-| **Step 6 & 7: Deploy & Smoke-Test Endpoint** (`03_deploy_sovereign_vllm.sh` + `04_test_endpoint.sh`) | `g2-standard-12` (1x L4) for **`25 mins`** (18m deploy + 5m model load + 2m testing) | $\dfrac{25\text{ mins}}{60\text{ mins/hr}} \times \$1.19/\text{hr}$ | **$0.50** | **~₹42** |
-| **Step 8: Mandatory Teardown** (`99_cleanup_resources.sh --confirm`) | Undeploys endpoint & deletes artifacts (~2 min) | Stops all hourly GPU & storage billing | **$0.00** | **₹0** |
-| **GRAND TOTAL (End-to-End Lab)** | **~65–70 minutes total wall-clock time** | $\$0.07 + \$0.16 + \$0.63 + \$0.50$ | **`$1.36 USD`** | **`~₹116 INR`** |
-
 > [!TIP]
-> **Cost Comparison Across All 4 Gemma 4 Models (Training + 25-Min Endpoint Test)**:
-> - **`google/gemma-4-E4B-it`** (1x L4, ~18 min train + 20 min test): **`~$0.95 USD` (`~₹80 INR`)**
-> - **`google/gemma-4-12B-it`** *(Default, 1x L4, ~32 min train + 25 min test)*: **`~$1.36 USD` (`~₹116 INR`)**
-> - **`google/gemma-4-26B-A4B-it`** (MoE, 1x L4, ~24 min train + 25 min test): **`~$1.20 USD` (`~₹102 INR`)**
-> - **`google/gemma-4-31B-it`** (2x L4 on `g2-standard-24` @ `$2.38/hr`, ~45 min train + 30 min test): **`~$3.20 USD` (`~₹272 INR`)**
-
----
-
-### 3. What Happens If You Forget to Run Cleanup? (The Idle Endpoint Cost Curve)
-
-> [!CAUTION]
-> - **Training Jobs (`Step 4b`) NEVER leak money** — Vertex AI automatically destroys the GPU VM the second `train_gemma_qlora.py` exits.
-> - **Vertex AI Endpoints (`Step 6`) and Colab/Workbench Notebooks DO NOT auto-delete** — they keep a dedicated `g2-standard-12` (1x L4 GPU) reserved 24/7 until you undeploy them:
->
-> | How Long You Leave the Endpoint Running | Calculation (`$1.19 / hr` in `asia-south1`) | Total Cost (USD) | Total Cost (INR) |
-> | :--- | :--- | :--- | :--- |
-> | **Cleaned up right after testing (Recommended)** | `0.42 hrs × $1.19/hr` | **`$0.50`** | **`~₹42`** |
-> | **Left running for 4 hours (Afternoon workshop)** | `4 hrs × $1.19/hr` | **`$4.76`** | **`~₹405`** |
-> | **Left running overnight (24 hours)** | `24 hrs × $1.19/hr` | **`$28.56`** | **`~₹2,428`** |
-> | **Left running over a weekend (72 hours)** | `72 hrs × $1.19/hr` | **`$85.68`** | **`~₹7,283`** |
-> | **Left running for a full month (730 hours)** | `730 hrs × $1.19/hr` | **`$868.70`** | **`~₹73,840`** |
->
-> **Always run `./scripts/99_cleanup_resources.sh --confirm --keep-bucket` (or `--confirm`) as soon as you finish Step 7!**
+> 💰 **Estimated Lab Cost**: Running the complete end-to-end bootcamp costs **`~$1.36 USD` (`~₹116 INR`)** when cleaned up afterward. See **[Appendix A: Lab Cost Breakdown & Explicit Billing Calculations](#appendix-a-lab-cost-breakdown--explicit-billing-calculations-usd--inr)** for the step-by-step unit price math.
 
 ---
 
@@ -176,7 +116,6 @@ Here is the exact math for every script you run in this bootcamp:
 **This document:**
 - [📋 Prerequisites Before Running This Lab (5-Minute Checklist)](#-prerequisites-before-running-this-lab-5-minute-checklist)
 - [🔬 Before vs. After Fine-Tuning: What Does Gemma 4 Actually Output?](#-before-vs-after-fine-tuning-what-does-gemma-4-actually-output)
-- [💰 What Will This Lab Cost Me? (Exact USD & INR Billing Breakdown + Step-by-Step Math)](#-what-will-this-lab-cost-me-exact-usd--inr-billing-breakdown--step-by-step-math)
 1. [Executive Summary: Why Digital Sovereignty Dictates Open-Weight Gemma 4 in Indian FSI](#1-executive-summary-why-digital-sovereignty-dictates-open-weight-models-in-indian-fsi)
 2. [Zero-Local-Docker & Zero-UV Architecture: Working Around Corporate Laptop Restrictions](#2-zero-local-docker--zero-uv-architecture-working-around-corporate-laptop-restrictions)
 3. [Module 1 (Theory): Regulatory Mapping — RBI & SEBI Mandates to Google Cloud Controls](#3-module-1-theory-regulatory-mapping--rbi--sebi-mandates-to-google-cloud-controls)
@@ -191,9 +130,11 @@ Here is the exact math for every script you run in this bootcamp:
 12. [Hands-On Bootcamp Lab 5: Statistical Benchmark Evaluation & Sovereign vLLM Deployment](#12-hands-on-bootcamp-lab-5-statistical-benchmark-evaluation--sovereign-vllm-deployment)
 13. [Module 8 (Theory & Lab): Evaluation-Driven Development ("Evals") & Iterative "Hillclimbing" in FSI](#13-module-8-theory--lab-evaluation-driven-development-evals--iterative-hillclimbing-in-fsi)
 14. [Module 9 (Deep-Dive Encyclopedia): Understanding Every GenAI Fine-Tuning Hyperparameter](#14-module-9-deep-dive-encyclopedia-understanding-every-genai-fine-tuning-hyperparameter)
-15. [Module 10 (Practical Operations): Running the Notebook on GCP & Handling India GPU Stockouts / Region Switching](#15-module-10-practical-operations-running-the-notebook-on-gcp--handling-gpu-stockouts--region-switching)
+15. [Module 10 (Practical Operations): Running the Notebook on GCP & Multi-Region / Hardware Flexibility](#15-module-10-practical-operations-running-the-notebook-on-gcp--multi-region--hardware-flexibility)
 16. [Module 11 (Mandatory): Cleanup, Teardown & Cost Control](#16-module-11-mandatory-cleanup-teardown--cost-control)
 17. [Module 12 (Production MLOps): Deploying at Scale for Real-World Inference & Zero-Downtime Model Updates](#17-module-12-production-mlops-deploying-at-scale-for-real-world-inference--zero-downtime-model-updates)
+18. [Production Engineering Safeguards](#18-production-engineering-safeguards-completion-only-loss-ood--adversarial-red-teaming-and-3-way-baseline-gating)
+- [💰 Appendix A: Lab Cost Breakdown & Explicit Billing Calculations (`USD` & `INR`)](#appendix-a-lab-cost-breakdown--explicit-billing-calculations-usd--inr)
 
 ---
 
@@ -692,14 +633,14 @@ Instead of updating all 12 Billion weights in `gemma-3-12b-it` (which requires ~
 
 ---
 
-## 15. Module 10 (Practical Operations): Running the Notebook on GCP & Handling India GPU Stockouts / Region Switching
+## 15. Module 10 (Practical Operations): Running the Notebook on GCP & Multi-Region / Hardware Flexibility
 
 ### 1. Which Google Cloud Service Should You Use to Run the Notebook?
 You do **NOT** need a local GPU, local Docker, or `uv` on your MacBook. Choose either of these two managed services in the Google Cloud Console:
 
-#### Service Option A: Vertex AI Colab Enterprise (Recommended #1 — Serverless & Instant Region Switching)
+#### Service Option A: Vertex AI Colab Enterprise (Recommended #1 — Serverless Managed Runtime)
 1. In the Google Cloud Console, go to **Vertex AI** -> **Colab Enterprise**.
-2. **Select Region**: Click the **Region dropdown** at the top of the page and choose **`asia-south1 (Mumbai)`** (or see Region Switching below).
+2. **Select Region**: Click the **Region dropdown** at the top of the page and choose your target region (e.g., **`asia-south1 (Mumbai)`**).
 3. **Create a Runtime Template**:
    - Click **Runtime Templates** -> **Create Template**.
    - Under **Machine Configuration**, select **GPU** -> **Accelerator Type: `NVIDIA L4`** -> **Count: `1`** (Machine Type: `g2-standard-12` with 24 GB VRAM).
@@ -711,46 +652,33 @@ You do **NOT** need a local GPU, local Docker, or `uv` on your MacBook. Choose e
 
 #### Service Option B: Vertex AI Workbench Instances (Dedicated Persistent JupyterLab VM)
 1. Go to **Vertex AI** -> **Workbench** -> **Instances** -> **Create New**.
-2. Select Region **`asia-south1 (Mumbai)`**, Machine Type **`g2-standard-12` (1x NVIDIA L4)**, and check **Install NVIDIA GPU driver automatically**.
+2. Select your target region (e.g., **`asia-south1 (Mumbai)`**), Machine Type **`g2-standard-12` (1x NVIDIA L4)**, and check **Install NVIDIA GPU driver automatically**.
 3. Click **Open JupyterLab**, upload this repository folder, and run the notebook cells.
 
 ---
 
-### 2. What to Do If `g2-standard-12` (NVIDIA L4) Is Unavailable or Out of Quota in India (`asia-south1` / `asia-south2`)?
-Because enterprise AI demand in Mumbai (`asia-south1`) and Delhi (`asia-south2`) is extremely high, you may encounter two common cloud roadblocks when trying to spin up an L4 GPU:
-- **`Quota 'NVIDIA_L4_GPUS' exceeded`**: Your sandbox project does not yet have regional L4 quota approved in `asia-south1`.
-- **`ZONE_RESOURCE_POOL_EXHAUSTED`**: Temporary physical stockout of L4 GPUs in Mumbai zones (`asia-south1-a/b/c`).
+### 2. Multi-Region Configuration, Project Quota Setup & Accelerator Flexibility
+Every script and notebook in this repository is parameterized so teams can adapt the pipeline to their organization's project quotas, preferred development regions, and available GPU tiers:
 
-As a Principal Architect, here are your **3 Immediate Action Plans**:
-
-#### Strategy 1: Switch Region for Learning / Bootcamp Prototyping (Takes 30 Seconds)
-When you are learning how to fine-tune or prototyping with synthetic data (which contains zero real customer PII), **the fine-tuning code, math, and resulting model weights are 100% identical in every Google Cloud region**.
-- **How to switch in Colab Enterprise UI**:
-  1. At the top of the **Colab Enterprise** screen, click the **Region dropdown** (`asia-south1`) and switch to one of Google Cloud's high-availability GPU super-regions:
-     - **`asia-southeast1` (Singapore)** *(Closest to India, lowest network latency)*
-     - **`us-central1` (Iowa)** *(Google Cloud's largest global pool of NVIDIA L4, A100, and H100 GPUs)*
-     - **`us-east4` (Northern Virginia)** or **`europe-west4` (Netherlands)**
-  2. Create your `g2-standard-12` (1x NVIDIA L4) Runtime Template in that region and run the notebook!
-- **How to switch in CLI Scripts (`scripts/01_setup_sovereign_infra.sh` & `scripts/02_submit_vertex_finetuning.sh`)**:
-  Every script in this repository dynamically uses the `${REGION}` environment variable. To run the entire pipeline in Singapore or Iowa, simply export `REGION` before running:
+#### Option 1: Multi-Region Parameterization (`REGION` Environment Variable)
+When prototyping with synthetic data (which contains zero real customer PII), **the fine-tuning code, math, and resulting model weights are 100% identical in every Google Cloud region**.
+- Every script dynamically reads the `${REGION}` environment variable (defaulting to `asia-south1`). To run the pipeline in any other region where your team holds GPU quota (such as `asia-south2`, `asia-southeast1`, `us-central1`, or `europe-west4`), simply export `REGION` before running:
   ```bash
-  # Switch from asia-south1 to asia-southeast1 (Singapore) or us-central1 (Iowa):
-  export REGION="asia-southeast1"
+  export REGION="asia-southeast1"   # or asia-south1, us-central1, europe-west4
   ./scripts/01_setup_sovereign_infra.sh
   ./scripts/02_submit_vertex_finetuning.sh
   ```
-- **The "Train Global, Deploy Sovereign" Pattern**: Once your fine-tuning job finishes in `asia-southeast1` or `us-central1`, copy the resulting merged `.safetensors` model weights into your sovereign Mumbai bucket (`gcloud storage cp -r gs://source-bucket/merged_model_bf16 gs://mumbai-sovereign-bucket/`) and deploy the vLLM endpoint strictly inside `asia-south1`!
+- **Train-Anywhere, Deploy-Regional Pattern**: If a development team trains a model on synthetic data in a global dev/test project, the resulting merged `.safetensors` weights can be copied into the regional production bucket (`gcloud storage cp -r gs://dev-bucket/merged_model_bf16 gs://prod-sovereign-bucket/`) for regional deployment.
 
-#### Strategy 2: Fallback to an NVIDIA T4 GPU Right Inside `asia-south1` (Mumbai)
-If you must stay strictly inside `asia-south1` (Mumbai) and L4 GPUs are unavailable, **`n1-standard-8` with 1x NVIDIA T4 GPU (16 GB VRAM)** almost always has abundant availability in Mumbai.
+#### Option 2: Automatic GPU Hardware Detection (`NVIDIA L4`, `A100`, or `T4`)
+Different sandbox and enterprise projects may have quota allocated for different GPU families (`NVIDIA L4`, `NVIDIA A100`, or `NVIDIA T4`).
 - **Automatic Hardware Detection Built Into Our Notebook**:
-  When you run **Cell 1** of [`notebooks/Gemma_FSI_Sovereign_FineTuning_Bootcamp.ipynb`](notebooks/Gemma_FSI_Sovereign_FineTuning_Bootcamp.ipynb), our Python code checks `torch.cuda.get_device_properties(0).total_memory`.
-  - If it detects **24 GB+ VRAM (NVIDIA L4 / A100)**, it selects **`google/gemma-3-12b-it`** (`~13.4 GB` VRAM).
-  - If it detects **16 GB VRAM (NVIDIA T4 Fallback)**, it **automatically switches the base model to `google/gemma-3-4b-it` (or `google/gemma-2-2b-it`)**, which requires only **`~5.4 GB VRAM`**—allowing you to complete the entire Indian FSI QLoRA bootcamp inside Mumbai on a T4 GPU without a single `CUDA Out Of Memory` crash!
+  When you run **Cell 1** of [`notebooks/Gemma_FSI_Sovereign_FineTuning_Bootcamp.ipynb`](notebooks/Gemma_FSI_Sovereign_FineTuning_Bootcamp.ipynb), our Python code checks `torch.cuda.get_device_properties(0).total_memory`:
+  - On **24 GB+ VRAM (`NVIDIA L4` / `A100`)**, it selects **`google/gemma-4-12B-it`** (`~13.8 GB` VRAM).
+  - On **16 GB VRAM (`NVIDIA T4` / `n1-standard-8`)**, it automatically selects a compact checkpoint (**`google/gemma-4-E4B-it`** or **`google/gemma-3-4b-it`**), allowing you to run the complete QLoRA workflow within 16 GB VRAM.
 
-#### Strategy 3: Production Customer Pattern — Dynamic Workload Scheduler (DWS)
-When advising an Indian Bank CISO who mandates that production training *must* occur on L4/A100 GPUs inside `asia-south1` (Mumbai) even during peak hours, instruct them to submit their Vertex AI Custom Training Job with **Dynamic Workload Scheduler (`FLEX_START`)**:
-- Instead of failing immediately with `ZONE_RESOURCE_POOL_EXHAUSTED`, Vertex AI queues the job in `asia-south1` and automatically provisions the L4/A100 GPU cluster the moment capacity frees up (typically within 15–90 minutes during off-peak banking hours).
+#### Option 3: Scheduled Batch Provisioning with Dynamic Workload Scheduler (`DWS`)
+For automated production retraining pipelines or large multi-GPU jobs, Vertex AI Custom Training supports **Dynamic Workload Scheduler (`FLEX_START`)**, which queues training requests and automatically provisions the target GPU cluster as scheduled capacity becomes available.
 
 ---
 
@@ -1075,3 +1003,62 @@ gemma-finetuning/
 └── notebooks/
     └── Gemma_FSI_Sovereign_FineTuning_Bootcamp.ipynb            # Interactive 15-Cell Vertex AI Workbench / Colab Enterprise Bootcamp Notebook
 ```
+
+---
+
+## Appendix A: Lab Cost Breakdown & Explicit Billing Calculations (`USD` & `INR`)
+
+Running the **entire end-to-end lab costs roughly `$1.10 – $1.45 USD` (`~₹95 – ₹125 INR`)**, **provided you run the cleanup script (`./scripts/99_cleanup_resources.sh --confirm`) when you finish**.
+
+### 1. Google Cloud Unit Pricing in `asia-south1` (Mumbai) Used in Calculations
+
+Here are the standard on-demand unit rates in **`asia-south1` (Mumbai)** (using exchange rate `$1 USD = ₹85 INR`):
+
+| GCP Resource SKU (`asia-south1` Mumbai) | Unit Rate (USD) | Unit Rate (INR) | How It Is Billed |
+| :--- | :--- | :--- | :--- |
+| **`g2-standard-12` Host VM** (12 vCPUs, 48 GB RAM) + **1x NVIDIA L4 GPU** (24 GB VRAM) | **`~$1.14 / hour`** *(`$0.44` host + `$0.70` L4 GPU)* | **`~₹97 / hour`** | Billed per-second (1-minute minimum) while the training job or endpoint VM is active. |
+| **Boot / Shuffle Disk** (`200 GB pd-ssd` attached to GPU worker) | **`~$0.05 / hour`** *(`$0.17 / GB-month`)* | **`~₹4 / hour`** | Prorated to the exact minutes the GPU VM exists; destroyed automatically when VM stops. |
+| **Combined `g2-standard-12` + 1x L4 + 200GB SSD Burn Rate** | **`$1.19 / hour`** **(`$0.0198 / minute`)** | **`~₹101 / hour`** **(`₹1.68 / min`)** | **Primary hourly rate for both training and online serving.** |
+| **Google Cloud Build** (`e2-highcpu-8` remote container builder) | **`$0.016 / build-min`** *(First 120 mins/day free)* | **`~₹1.36 / min`** | Runs for ~10 mins on your first training submission; cached in Artifact Registry afterwards. |
+| **Cloud KMS CMEK Key Version** (`software` protection level) | **`$0.06 / month`** + `$0.03 / 10k ops` | **`~₹5 / month`** | Flat monthly fee per active key version (`< $0.01` for crypto operations during the lab). |
+| **Cloud Storage Regional (`asia-south1`)** (`~48 GB` base mirror + merged weights) | **`$0.023 / GB-month`** | **`~₹1.95 / GB-mo`** | `48 GB × $0.023 = $1.10/month` if kept all month, or **`$0.004` (`₹0.35`)** if deleted after a 2-hour lab. |
+| **Artifact Registry (`asia-south1`)** (`~8.5 GB` trainer image) | **`$0.10 / GB-month`** *(First 0.5 GB free)* | **`~₹8.50 / GB-mo`** | `8 GB × $0.10 = $0.80/month` if kept all month, or **`$0.002` (`₹0.20`)** if deleted after a 2-hour lab. |
+
+---
+
+### 2. Step-by-Step Cost Calculation for a Complete End-to-End Lab Run (`google/gemma-4-12B-it`)
+
+| Lab Step & Script | Resource & Duration | Explicit Cost Calculation Formula | Exact Cost (USD) | Exact Cost (INR) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Step 0: Pre-Flight Check** (`00_preflight_check.sh`) | Read-only `gcloud` CLI checks (~15 sec) | $0 \text{ compute} \times \$0$ | **$0.00** | **₹0** |
+| **Step 1 & 2: Dataset Gen & Audit** (`generate_fsi_dataset.py`, `inspect_dataset.py`) | Cloud Shell CPU (free tier, ~5 sec) | $0 \text{ billable compute}$ | **$0.00** | **₹0** |
+| **Step 3: Sovereign KMS & GCS Setup** (`01_setup_sovereign_infra.sh`) | 1 KMS key version + crypto ops + 2-hr storage | $\$0.06\text{ (KMS)} + \$0.006\text{ (2-hr GCS/AR)}$ | **$0.07** | **~₹6** |
+| **Step 4a: Remote Container Build** (`02_submit_vertex_finetuning.sh` first run) | Cloud Build `e2-highcpu-8` for `10 mins` | $10\text{ min} \times \$0.016/\text{min}$ *(often $0 in free tier)* | **$0.16** *(or $0.00)* | **~₹14** *(or ₹0)* |
+| **Step 4b: QLoRA Fine-Tuning Job** (`02_submit_vertex_finetuning.sh`) | `g2-standard-12` (1x L4) for **`32 mins`** (VM boot + 75 steps + BF16 merge + GCS upload) | $\dfrac{32\text{ mins}}{60\text{ mins/hr}} \times \$1.19/\text{hr}$ *(Auto-terminates!)* | **$0.63** | **~₹54** |
+| **Step 5: Offline Benchmark & Hillclimb** (`evaluate_fsi_model.py`, `passbook_parser_benchmark.py`) | Cloud Shell CPU (free tier, ~5 sec) | $0 \text{ billable compute}$ | **$0.00** | **₹0** |
+| **Step 6 & 7: Deploy & Smoke-Test Endpoint** (`03_deploy_sovereign_vllm.sh` + `04_test_endpoint.sh`) | `g2-standard-12` (1x L4) for **`25 mins`** (18m deploy + 5m model load + 2m testing) | $\dfrac{25\text{ mins}}{60\text{ mins/hr}} \times \$1.19/\text{hr}$ | **$0.50** | **~₹42** |
+| **Step 8: Mandatory Teardown** (`99_cleanup_resources.sh --confirm`) | Undeploys endpoint & deletes artifacts (~2 min) | Stops all hourly GPU & storage billing | **$0.00** | **₹0** |
+| **GRAND TOTAL (End-to-End Lab)** | **~65–70 minutes total wall-clock time** | $\$0.07 + \$0.16 + \$0.63 + \$0.50$ | **`$1.36 USD`** | **`~₹116 INR`** |
+
+> [!TIP]
+> **Cost Comparison Across All 4 Gemma 4 Models (Training + 25-Min Endpoint Test)**:
+> - **`google/gemma-4-E4B-it`** (1x L4, ~18 min train + 20 min test): **`~$0.95 USD` (`~₹80 INR`)**
+> - **`google/gemma-4-12B-it`** *(Default, 1x L4, ~32 min train + 25 min test)*: **`~$1.36 USD` (`~₹116 INR`)**
+> - **`google/gemma-4-26B-A4B-it`** (MoE, 1x L4, ~24 min train + 25 min test): **`~$1.20 USD` (`~₹102 INR`)**
+> - **`google/gemma-4-31B-it`** (2x L4 on `g2-standard-24` @ `$2.38/hr`, ~45 min train + 30 min test): **`~$3.20 USD` (`~₹272 INR`)**
+
+---
+
+### 3. Idle Endpoint Cost Curve (Why Step 8 Teardown Matters)
+
+- **Training Jobs (`Step 4b`) automatically terminate** when `train_gemma_qlora.py` finishes.
+- **Vertex AI Endpoints (`Step 6`) and Colab/Workbench Notebooks stay active** until undeployed:
+
+| Endpoint Active Duration | Calculation (`$1.19 / hr` in `asia-south1`) | Total Cost (USD) | Total Cost (INR) |
+| :--- | :--- | :--- | :--- |
+| **Cleaned up right after testing (Recommended)** | `0.42 hrs × $1.19/hr` | **`$0.50`** | **`~₹42`** |
+| **Active for 4 hours (Half-day workshop)** | `4 hrs × $1.19/hr` | **`$4.76`** | **`~₹405`** |
+| **Active for 24 hours (1 day)** | `24 hrs × $1.19/hr` | **`$28.56`** | **`~₹2,428`** |
+| **Active for 72 hours (Weekend)** | `72 hrs × $1.19/hr` | **`$85.68`** | **`~₹7,283`** |
+| **Active for 730 hours (Full month, 24/7)** | `730 hrs × $1.19/hr` | **`$868.70`** | **`~₹73,840`** |
+
