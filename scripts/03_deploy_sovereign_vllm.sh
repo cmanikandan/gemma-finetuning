@@ -128,6 +128,10 @@ else
       --member="serviceAccount:${sa}" \
       --role="roles/storage.objectViewer" \
       --condition=None --quiet >/dev/null 2>&1 || true
+    gcloud storage buckets add-iam-policy-binding "gs://${BUCKET_NAME}" \
+      --member="serviceAccount:${sa}" \
+      --role="roles/storage.objectViewer" \
+      --project="${PROJECT_ID}" >/dev/null 2>&1 || true
     gcloud kms keys add-iam-policy-binding "gemma-cmek-key" \
       --keyring="fsi-sovereign-kr" \
       --location="${REGION}" \
@@ -135,6 +139,10 @@ else
       --role="roles/cloudkms.cryptoKeyEncrypterDecrypter" \
       --project="${PROJECT_ID}" >/dev/null 2>&1 || true
   done
+  gcloud iam service-accounts add-iam-policy-binding "${COMPUTE_SA}" \
+    --member="serviceAccount:${VERTEX_SA}" \
+    --role="roles/iam.serviceAccountUser" \
+    --project="${PROJECT_ID}" >/dev/null 2>&1 || true
 
   echo "[*] Syncing training/serve_gemma_vertex.py to gs://${BUCKET_NAME}/scripts/serve_gemma_vertex.py..."
   gcloud storage cp ./training/serve_gemma_vertex.py "gs://${BUCKET_NAME}/scripts/serve_gemma_vertex.py" --project="${PROJECT_ID}" >/dev/null
@@ -201,7 +209,7 @@ print(base64.b64encode(code.encode()).decode())
   fi
   echo "    -> Endpoint Resource: ${ENDPOINT_RESOURCE}"
 
-  echo "[3/3] Deploying Model to Endpoint on NVIDIA L4 GPU (g2-standard-12)..."
+  echo "[3/3] Deploying Model to Endpoint on NVIDIA L4 GPU (g2-standard-12) as ${COMPUTE_SA}..."
   echo "      (Note: Provisioning the GPU VM and loading the 12B checkpoint takes ~10-15 minutes)"
   gcloud ai endpoints deploy-model "${ENDPOINT_RESOURCE}" \
     --region="${REGION}" \
@@ -209,6 +217,7 @@ print(base64.b64encode(code.encode()).decode())
     --display-name="${MODEL_DISPLAY_NAME}-v1" \
     --machine-type="g2-standard-12" \
     --accelerator="type=nvidia-l4,count=1" \
+    --service-account="${COMPUTE_SA}" \
     --min-replica-count=1 \
     --max-replica-count=1 \
     --project="${PROJECT_ID}"
