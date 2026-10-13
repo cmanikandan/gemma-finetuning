@@ -12,22 +12,22 @@
 
 ![End-to-end bootcamp lab journey: pre-flight check, generate the 1,500-example FSI dataset, audit it, provision CMEK infrastructure in Mumbai, run QLoRA fine-tuning on Vertex AI, evaluate with bootstrap confidence intervals, deploy to a sovereign vLLM endpoint, smoke test it, and finally clean up all resources](images/06_end_to_end_lab_journey.jpg)
 
-| # | Step | Command | Wall-Clock Time | Cost | GPU Needed? |
+| # | Step | Command | Wall-Clock Time | Cost Formula (`asia-south1` Mumbai) | Exact Cost (USD / INR) |
 | :-- | :--- | :--- | :--- | :--- | :--- |
-| 0 | Pre-flight validation | `./scripts/00_preflight_check.sh` | ~60 sec | $0.00 (`₹0`) | No |
-| 1 | Generate 5-split FSI dataset + Data Card | `python3 data/generate_fsi_dataset.py` | ~3 sec | $0.00 (`₹0`) | No |
-| 2 | Audit dataset quality, masks & leakage | `python3 data/inspect_dataset.py` | ~2 sec | $0.00 (`₹0`) | No |
-| 3 | Provision sovereign infra (KMS/GCS/AR) | `./scripts/01_setup_sovereign_infra.sh` | ~3 min | ~$0.06/mo (`~₹5/mo`) | No |
-| 4 | Run Gemma 4 QLoRA fine-tuning on Vertex AI | `./scripts/02_submit_vertex_finetuning.sh` | ~22–30 min | **~$0.38–$0.62 (`~₹32–₹52`)** | Yes (1x L4) |
-| 5 | Run 3-way Rules/Base/Tuned & Passbook benchmarks | `python3 evaluation/evaluate_fsi_model.py && python3 evaluation/passbook_parser_benchmark.py` | ~5 sec | $0.00 (`₹0`) | No |
-| 6 | Deploy sovereign vLLM endpoint | `./scripts/03_deploy_sovereign_vllm.sh` | ~15–20 min | **~$0.20 (Cloud Run) / ~$1.15/hr (Vertex)** ⚠️ | Yes (1x L4) |
-| 7 | Smoke test & score the live endpoint | `./scripts/04_test_endpoint.sh` / `python3 evaluation/predict_endpoint.py` | ~30 sec | (included above) | — |
-| 8 | **Teardown (MANDATORY)** | `./scripts/99_cleanup_resources.sh --confirm` | ~5 min | Stops all billing | — |
-
-**Total hands-on time**: ~60–75 minutes. **Total cost if you clean up promptly**: **~$0.80 – $1.50 USD (`~₹70 – ₹130 INR`)**.
+| 0 | Pre-flight validation | `./scripts/00_preflight_check.sh` | ~60 sec | Read-only `gcloud` API calls | **$0.00 (`₹0`)** |
+| 1 | Generate 5-split FSI dataset + Data Card | `python3 data/generate_fsi_dataset.py` | ~3 sec | Cloud Shell CPU (Free Tier) | **$0.00 (`₹0`)** |
+| 2 | Audit dataset quality, masks & leakage | `python3 data/inspect_dataset.py` | ~2 sec | Cloud Shell CPU (Free Tier) | **$0.00 (`₹0`)** |
+| 3 | Provision sovereign infra (KMS/GCS/AR) | `./scripts/01_setup_sovereign_infra.sh` | ~3 min | `1 KMS Key ($0.06/mo) + 2-hr GCS/AR ($0.006)` | **~$0.07 (`~₹6`)** |
+| 4a | Remote Cloud Build (first run only) | *(inside `02_submit_vertex_finetuning.sh`)* | ~10 min | `10 min × $0.016/min` *(or $0 free tier)* | **~$0.16 (`~₹14`)** |
+| 4b | Run Gemma 4 QLoRA fine-tuning on Vertex AI | `./scripts/02_submit_vertex_finetuning.sh` | ~32 min | `(32 / 60 hr) × $1.19/hr` *(1x L4 + 12 vCPU + 200GB SSD; auto-terminates!)* | **~$0.63 (`~₹54`)** |
+| 5 | Run 3-way Rules/Base/Tuned & Passbook benchmarks | `python3 evaluation/evaluate_fsi_model.py && python3 evaluation/passbook_parser_benchmark.py` | ~5 sec | Cloud Shell CPU (Free Tier) | **$0.00 (`₹0`)** |
+| 6 | Deploy sovereign GPU endpoint | `./scripts/03_deploy_sovereign_vllm.sh` | ~20 min | `(25 / 60 hr) × $1.19/hr` *(20m deploy + 5m test)* ⚠️ | **~$0.50 (`~₹42`)** |
+| 7 | Smoke test & score the live endpoint | `./scripts/04_test_endpoint.sh` | ~45 sec | *(Included in Step 6 endpoint window)* | **$0.00 (`₹0`)** |
+| 8 | **Teardown (MANDATORY)** | `./scripts/99_cleanup_resources.sh --confirm` | ~2 min | Undeploys endpoint & deletes artifacts | **Stops all billing** |
+| **TOTAL** | **Full End-to-End Bootcamp** | **All 8 Steps** | **~65–70 min** | **`$0.07 + $0.16 + $0.63 + $0.50`** | **`~$1.36 USD (~₹116 INR)`** |
 
 > [!CAUTION]
-> **Step 8 is not optional.** A dedicated Vertex AI endpoint created in Step 6 bills **~$1.15/hour whether or not you send it a single request**. If you only do one thing from this runbook, make it Step 8.
+> **Step 8 is not optional.** A dedicated Vertex AI endpoint (`g2-standard-12` + 1x L4 GPU + 200GB SSD) bills **`$1.19/hour` (`~₹101/hour` = `$28.56/day` = `$868.70/month`)** continuously until undeployed, whether or not you send it a single request. If you only do one thing from this runbook, make it Step 8.
 
 ---
 
@@ -481,16 +481,23 @@ Deploying (this takes 15-20 minutes)...
 
 **What to look for** (the script prints this guidance):
 - **Correct circular numbers** — a hallucinated circular number is a compliance incident, not a typo.
-- **Exact figures** — 10% UBO threshold, 5% FLDG cap, ₹100/day, 18% GST.
+- **Exact figures** — 10% UBO threshold, 5% FLDG cap, ₹100/day (`₹400` for 4 days past `T+5`), 18% GST.
 - **Refusal behaviour** — the model should *never* tell a customer that an STR was filed (PMLA §12A tipping-off prohibition).
-- **Latency** — expect ~1–3 seconds for a full response on 1x L4; TTFT should be well under 100 ms.
+
+### Side-by-Side Comparison: What Untuned `google/gemma-4-12B-it` vs. Your Fine-Tuned Model Outputs on These 3 Prompts
+
+| Test Prompt | ❌ Before Fine-Tuning (`google/gemma-4-12B-it` Base) | ✅ After QLoRA Fine-Tuning (`gemma4-fsi-sovereign-model`) |
+| :--- | :--- | :--- |
+| **Test 1: UPI P2M Failed Txn (`T+9`, `₹12,500`)** | *"Banks reverse failed UPI transactions in 1–5 days or pay ₹100/day. For 9 days, compensation is ₹900."* *(Misses `RBI/2019-20/67`, misses `UDIR-01`, wrong math `₹900` instead of `₹400`)* | Cites **`RBI/2019-20/67`** + **`UDIR-01`**, applies `T+5` P2M TAT window, and computes $(9 - 5) \times ₹100 = \mathbf{₹400}$ penalty (**`₹12,900`** total credit). |
+| **Test 2: High-Risk Pvt Ltd UBO, Re-KYC & STR** | *"UBO threshold is **25%** (FATF standard), Re-KYC is 2 years, and explain transparently if an AML review froze the account."* *(Outdated 25% UBO + criminal PMLA §12A tipping-off!)* | States **`>10%` UBO threshold** (2023 PMLA Rule 9(3) amendment), **`2-year`** Re-KYC, **`7-day`** Rule 8(2) STR timeline, and enforces **PMLA Section 12A anti-tipping-off**. |
+| **Test 3: Digital Lending KFS APR & 12% FLDG** | *"APR is ~20.5%. Document the 12% FLDG and LSP nodal escrow routing in the SLA."* *(Approves illegal `>5%` FLDG and illegal LSP escrow pass-through!)* | Computes **`21.03%` KFS APR** (`₹2,500` fee + `₹450` GST) and **blocks disbursement** citing **`DOR.CRE.REC.21/21.07.001/2023-24`** (`5%` FLDG cap) & **Para 3 direct RE-to-borrower flow**. |
 
 **If responses look generic** (no circular numbers, hedging language like "you should consult your bank"), you are almost certainly hitting the **base model, not the fine-tuned one**. Verify with:
 
 ```bash
 gcloud ai endpoints describe <ENDPOINT_ID> --region="${REGION}" \
   --format="value(deployedModels[0].displayName)"
-# Expect: gemma-indian-fsi-sovereign
+# Expect: gemma4-fsi-sovereign-model-v1
 ```
 
 ---
@@ -498,7 +505,7 @@ gcloud ai endpoints describe <ENDPOINT_ID> --region="${REGION}" \
 ## Step 8 — Teardown (MANDATORY)
 
 > [!CAUTION]
-> Do not skip this. An idle endpoint costs **~$620/month**.
+> Do not skip this. An idle endpoint costs **`$1.19/hour` (`~$868/month`)**.
 
 ### 8a. Dry Run First (Always Safe)
 
@@ -545,6 +552,68 @@ gcloud colab runtimes delete <RUNTIME_ID> --region="${REGION}" --project="${PROJ
 Or: **Vertex AI Console → Colab Enterprise → Runtimes → Stop**.
 
 For full detail on what each teardown step does and why KMS keys take 24 hours to destroy, see **README Module 11**.
+
+---
+
+## Step 9 — Production Scaling & How to Update / Redeploy the Model (`v1` → `v2`)
+
+Once you move from this single-replica lab to production banking inference at scale:
+
+### 9a. Production Serving Best Practices at Scale
+1. **Use vLLM (`PagedAttention` + Continuous Batching + FP8/AWQ)**: Replaces single-stream `model.generate()` (`~7.5 tok/s`) with **vLLM continuous batching (`--max-num-seqs=64`) + `--enable-prefix-caching`**, boosting throughput to **`55–85 tokens/sec`** and cutting Time-to-First-Token (TTFT) to **`< 25 ms`**.
+2. **Multi-Zone High Availability & Autoscaling**: Set `--min-replica-count=2 --max-replica-count=10` so Vertex AI spreads replicas across `asia-south1-a` and `asia-south1-b` and autoscales when GPU duty cycle exceeds `70%`.
+3. **Private Service Connect (PSC) + VPC-SC + Model Armor**: Expose the endpoint strictly via a private PSC IP inside your bank's VPC-SC perimeter with Google Cloud Model Armor screening prompts and responses.
+4. **Dynamic Multi-LoRA on GKE (For 5+ Banking Teams)**: If serving multiple departments (KYC, Lending, Treasury, SEBI, UPI), deploy 1 shared `gemma-4-12B-it` base model on GKE with vLLM `--enable-lora` and hot-swap 130 MB LoRA adapters per request—cutting GPU fleet costs by **70%–85%**.
+
+### 9b. How to Update the Model (`v2`) & Redeploy with Zero Downtime
+When a new RBI/SEBI circular is released or you add new training examples:
+
+```bash
+# 1. Add new examples, verify zero leakage, and upload updated JSONLs to GCS
+python3 data/generate_fsi_dataset.py --samples-per-domain 350 --output-dir data
+python3 data/inspect_dataset.py
+gcloud storage cp data/*.jsonl data/data_card.json "gs://${BUCKET_NAME}/data/"
+
+# 2. Train v2 (reuses cached container & GCS base mirror — finishes in ~25 mins)
+./scripts/02_submit_vertex_finetuning.sh
+
+# 3. Run offline regression gate (must beat v1 + 100% PMLA safety)
+python3 evaluation/evaluate_fsi_model.py
+
+# 4. Upload v2 as a new version under the existing parent model in Vertex AI Model Registry
+NEW_MODEL_URI=$(gcloud storage ls "gs://${BUCKET_NAME}/models/" | grep '/$' | sort | tail -n 1)merged_model_bf16
+PARENT_MODEL_ID=$(gcloud ai models list --region="${REGION}" --project="${PROJECT_ID}" \
+  --filter="displayName:gemma4-fsi-sovereign-model" --format="value(name)" | head -n 1)
+
+gcloud ai models upload \
+  --region="${REGION}" --project="${PROJECT_ID}" \
+  --parent-model="${PARENT_MODEL_ID}" \
+  --display-name="gemma4-fsi-sovereign-model" \
+  --version-aliases="v2,challenger" \
+  --container-image-uri="${REGION}-docker.pkg.dev/${PROJECT_ID}/fsi-gemma-repo/gemma-qlora-trainer:v1" \
+  --container-env-vars="MODEL_ID=${NEW_MODEL_URI},QUANTIZATION=nf4" \
+  --container-command="python3,/app/serve_gemma_vertex.py" \
+  --container-ports=8080 --container-predict-route="/predict" --container-health-route="/health"
+
+# 5. Canary deploy v2 with a 90% (v1) / 10% (v2) traffic split on the SAME Endpoint ID
+ENDPOINT_ID=$(gcloud ai endpoints list --region="${REGION}" --project="${PROJECT_ID}" \
+  --filter="displayName:fsi-sovereign-vllm-endpoint" --format="value(name)" | head -n 1)
+V1_DEPLOYED_ID=$(gcloud ai endpoints describe "${ENDPOINT_ID}" --region="${REGION}" \
+  --project="${PROJECT_ID}" --format="value(deployedModels[0].id)")
+
+gcloud ai endpoints deploy-model "${ENDPOINT_ID}" \
+  --region="${REGION}" --project="${PROJECT_ID}" \
+  --model="${PARENT_MODEL_ID}@2" \
+  --display-name="gemma4-fsi-sovereign-model-v2" \
+  --machine-type="g2-standard-12" --accelerator="type=nvidia-l4,count=1" \
+  --min-replica-count=1 --max-replica-count=2 \
+  --service-account="$(gcloud projects describe ${PROJECT_ID} --format='value(projectNumber)')-compute@developer.gserviceaccount.com" \
+  --traffic-split="${V1_DEPLOYED_ID}=90,0=10"
+
+# 6. Once verified with ./scripts/04_test_endpoint.sh, cut over 100% traffic to v2 and undeploy v1!
+```
+
+See **[README Module 12](../README.md#17-module-12-production-mlops-deploying-at-scale-for-real-world-inference--zero-downtime-model-updates)** for the complete production architecture matrix, cutover commands, and 5-second rollback command.
 
 ---
 
