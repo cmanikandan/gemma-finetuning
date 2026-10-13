@@ -73,13 +73,17 @@ import json, sys
 body = {
   'instances': [{
     'prompt': sys.argv[1],
+    'messages': [
+      {'role': 'system', 'content': sys.argv[2]},
+      {'role': 'user', 'content': sys.argv[3]}
+    ],
     'max_tokens': 512,
     'temperature': 0.1,
     'top_p': 0.95
   }]
 }
 print(json.dumps(body))
-" "${full_prompt}" > /tmp/fsi_request.json
+" "${full_prompt}" "${SYSTEM_PROMPT}" "${user_prompt}" > /tmp/fsi_request.json
 
   START_MS=$(python3 -c "import time; print(int(time.time()*1000))")
   RESPONSE=$(curl -s -X POST \

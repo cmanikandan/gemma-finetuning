@@ -118,11 +118,12 @@ elif [[ "${DEPLOY_TARGET}" == "model-garden" ]]; then
     --project="${PROJECT_ID}"
   echo "[+] Vertex AI Model Garden Custom Weights Deployment Initiated!"
 else
-  # Ensure the Vertex AI Service Agent can read the merged model from the CMEK-encrypted bucket
+  # Ensure the Vertex AI Service Agent & Compute Engine Default SA can read the merged model from the CMEK-encrypted bucket
   PROJECT_NUMBER=$(gcloud projects describe "${PROJECT_ID}" --format="value(projectNumber)")
   VERTEX_SA="service-${PROJECT_NUMBER}@gcp-sa-aiplatform.iam.gserviceaccount.com"
+  CUSTOM_CODE_SA="service-${PROJECT_NUMBER}@gcp-sa-aiplatform-cc.iam.gserviceaccount.com"
   COMPUTE_SA="${PROJECT_NUMBER}-compute@developer.gserviceaccount.com"
-  for sa in "${VERTEX_SA}" "${COMPUTE_SA}"; do
+  for sa in "${VERTEX_SA}" "${CUSTOM_CODE_SA}" "${COMPUTE_SA}"; do
     gcloud projects add-iam-policy-binding "${PROJECT_ID}" \
       --member="serviceAccount:${sa}" \
       --role="roles/storage.objectViewer" \
@@ -135,31 +136,52 @@ else
       --project="${PROJECT_ID}" >/dev/null 2>&1 || true
   done
 
-  echo "[1/3] Uploading Fine-Tuned Gemma Model to Vertex AI Model Registry (${REGION})..."
-  # Note: On a single 24GB NVIDIA L4 (g2-standard-12), 12B BF16 weights (~24GB) use dynamic 4-bit bitsandbytes
-  # quantization in vLLM so weights take ~8GB VRAM and leave ~13GB VRAM for the PagedAttention KV cache.
-  VLLM_CONTAINER_ARGS="--model=\$(AIP_STORAGE_URI),--dtype=bfloat16,--quantization=bitsandbytes,--load-format=bitsandbytes,--max-model-len=4096,--max-num-seqs=16,--gpu-memory-utilization=0.90,--enable-prefix-caching"
+  echo "[*] Syncing training/serve_gemma_vertex.py to gs://${BUCKET_NAME}/scripts/serve_gemma_vertex.py..."
+  gcloud storage cp ./training/serve_gemma_vertex.py "gs://${BUCKET_NAME}/scripts/serve_gemma_vertex.py" --project="${PROJECT_ID}" >/dev/null
 
-  MODEL_RESOURCE=$(gcloud ai models upload \
+  # Prefer the verified in-region Gemma 4 GPU container in Artifact Registry if built during Step 4
+  TRAINER_IMAGE_URI="${REGION}-docker.pkg.dev/${PROJECT_ID}/fsi-gemma-repo/gemma-qlora-trainer:v1"
+  if gcloud artifacts docker images describe "${TRAINER_IMAGE_URI}" --project="${PROJECT_ID}" &>/dev/null; then
+    SERVE_IMAGE_URI="${TRAINER_IMAGE_URI}"
+    echo "[*] Using verified in-region Gemma 4 GPU container: ${SERVE_IMAGE_URI}"
+  else
+    SERVE_IMAGE_URI="${VLLM_IMAGE_URI}"
+  fi
+
+  # Base64-encode bootstrap so --container-args has zero spaces, commas, or shell-escaping ambiguities
+  BOOTSTRAP_B64=$(python3 -c "
+import base64
+code = '''import json, os, urllib.request
+req = urllib.request.Request('http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/token', headers={'Metadata-Flavor': 'Google'})
+tok = json.loads(urllib.request.urlopen(req, timeout=10).read().decode())['access_token']
+url = 'https://storage.googleapis.com/storage/v1/b/${BUCKET_NAME}/o/scripts%2Fserve_gemma_vertex.py?alt=media'
+r = urllib.request.Request(url, headers={'Authorization': 'Bearer ' + tok})
+with urllib.request.urlopen(r, timeout=30) as resp, open('/tmp/serve_gemma_vertex.py', 'wb') as f:
+    f.write(resp.read())
+os.execvp('python3', ['python3', '/tmp/serve_gemma_vertex.py'])
+'''
+print(base64.b64encode(code.encode()).decode())
+")
+
+  echo "[1/3] Uploading Fine-Tuned Gemma Model to Vertex AI Model Registry (${REGION})..."
+  gcloud ai models upload \
     --region="${REGION}" \
     --display-name="${MODEL_DISPLAY_NAME}" \
-    --container-image-uri="${VLLM_IMAGE_URI}" \
+    --container-image-uri="${SERVE_IMAGE_URI}" \
     --artifact-uri="${MODEL_ARTIFACT_GCS_URI}" \
-    --container-args="${VLLM_CONTAINER_ARGS}" \
-    --container-ports=8000 \
-    --container-predict-route="/v1/completions" \
+    --container-command="python3" \
+    --container-args="^|^-c|import base64;exec(base64.b64decode('${BOOTSTRAP_B64}'))" \
+    --container-ports=8080 \
+    --container-predict-route="/predict" \
     --container-health-route="/health" \
-    --project="${PROJECT_ID}" \
-    --format="value(model)" 2>/dev/null || true)
+    --project="${PROJECT_ID}" >/dev/null
 
-  if [[ -z "${MODEL_RESOURCE}" ]]; then
-    MODEL_RESOURCE=$(gcloud ai models list \
-      --region="${REGION}" \
-      --project="${PROJECT_ID}" \
-      --filter="displayName=${MODEL_DISPLAY_NAME}" \
-      --sort-by="~createTime" \
-      --format="value(name)" | head -n 1)
-  fi
+  MODEL_RESOURCE=$(gcloud ai models list \
+    --region="${REGION}" \
+    --project="${PROJECT_ID}" \
+    --filter="displayName=${MODEL_DISPLAY_NAME}" \
+    --sort-by="~createTime" \
+    --format="value(name)" 2>/dev/null | head -n 1)
   echo "    -> Uploaded Model Resource: ${MODEL_RESOURCE}"
 
   echo "[2/3] Locating or Creating Dedicated Vertex AI Prediction Endpoint in ${REGION}..."
@@ -168,7 +190,7 @@ else
     --project="${PROJECT_ID}" \
     --filter="displayName=${ENDPOINT_DISPLAY_NAME}" \
     --sort-by="~createTime" \
-    --format="value(name)" | head -n 1 || true)
+    --format="value(name)" 2>/dev/null | head -n 1 || true)
 
   if [[ -z "${ENDPOINT_RESOURCE}" ]]; then
     ENDPOINT_RESOURCE=$(gcloud ai endpoints create \
@@ -180,15 +202,16 @@ else
   echo "    -> Endpoint Resource: ${ENDPOINT_RESOURCE}"
 
   echo "[3/3] Deploying Model to Endpoint on NVIDIA L4 GPU (g2-standard-12)..."
+  echo "      (Note: Provisioning the GPU VM and loading the 12B checkpoint takes ~10-15 minutes)"
   gcloud ai endpoints deploy-model "${ENDPOINT_RESOURCE}" \
     --region="${REGION}" \
     --model="${MODEL_RESOURCE}" \
     --display-name="${MODEL_DISPLAY_NAME}-v1" \
     --machine-type="g2-standard-12" \
-    --accelerator="type=NVIDIA_L4,count=1" \
+    --accelerator="type=nvidia-l4,count=1" \
     --min-replica-count=1 \
-    --max-replica-count=2 \
+    --max-replica-count=1 \
     --project="${PROJECT_ID}"
 
-  echo "[+] Vertex AI Dedicated vLLM Endpoint Deployed in ${REGION}!"
+  echo "[+] Vertex AI Dedicated GPU Endpoint Deployed in ${REGION}!"
 fi
